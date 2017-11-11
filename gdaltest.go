@@ -8,13 +8,13 @@ import (
 )
 
 // Tracks the time elapsed since start.
-func timeTrack(start time.Time, name string) {
+func Timetrack(start time.Time, name string) {
 	elapsed := time.Since(start)
 	fmt.Printf("%s took %s\n", name, elapsed)
 }
 
 func main3() {
-	defer timeTrack(time.Now(), "main")
+	defer Timetrack(time.Now(), "main")
 
 	//DEBUG ONLY
 	filename := "SENTINEL2_L1C:S2A_MSIL1C_20171019T111051_N0205_R137_T31UCT_20171019T111235.SAFE/MTD_MSIL1C.xml:10m:EPSG_32631"
@@ -28,16 +28,16 @@ func main3() {
 	go ReadDataFromDataset(3, filename, ch)
 	c := <-ch
 
-	defer timeTrack(time.Now(), "go routine started")
+	// defer Timetrack(time.Now(), "go routine started")
 
-	writeGeoTIFF(filename, a, b, c, 0, 65536, 0, 65536, 0, 65536)
+	writeGeoTIFF_RGB(filename, a, b, c, 0, 65536, 0, 65536, 0, 65536)
 
 }
 
 // TODO(specki) refactor to load multiple bands if they are in same subdataset instead of loading them seperately
 // TODO(specki) Bandname (B02) to bandnumber (1-indexed)
 func ReadDataFromDataset(bandnumber int, filename string, ch chan []uint16) error {
-	defer timeTrack(time.Now(), "Reading Data from Dataset "+filename)
+	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 	// Open Dataset via GDAL
 	dataset, err := gdal.Open(filename, gdal.ReadOnly)
 	if err != nil {
@@ -76,42 +76,102 @@ func ReadDataFromDataset(bandnumber int, filename string, ch chan []uint16) erro
 	return nil
 }
 
-//TODO(specki) Allow 1 Band for Greyscale images
-//TODO(specki) Images with different resolutions
-func writeGeoTIFF(
+func writeGeoTIFF_GREY(
 	inputdataset string,
-	red, green, blue []uint16,
-	minred, maxred, mingreen, maxgreen, minblue, maxblue float64,
+	grey []uint16,
+	mingrey, maxgrey float64,
 ) error {
-	defer timeTrack(time.Now(), "WriteGeoTIFF: ")
+	//TODO(specki) replace tmp with dataset id
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp",3)
+	if err != nil{
+		log.Fatal(err)
+		return err
+	}
+	// Calculate current value ranges
+	deltagrey := sliceDelta(grey)
 
+	// 8bit data
+	var data8bit = make([]byte, len(grey))
+
+	// Convert uint16 Data to 8bit
+	for i := 0; i < len(grey); i++ {
+		g := float64(grey[i])
+		if g < mingrey || maxgrey < g {
+			g = 0
+		}
+		data8bit[i] = (byte)((g / deltagrey) * 255)
+	}
+
+	newdataset.IO(
+		gdal.Write,
+		0,
+		0,
+		rastersize,
+		rastersize,
+		data8bit,
+		rastersize,
+		rastersize,
+		1,
+		[]int{1},
+		0,
+		0,
+		0,
+	)
+	newdataset.Close()
+	return nil
+}
+
+// creates new GeoTIFF with same georeference as inputdataset.
+func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dataset, int, error) {
 	// Open original file to copy Georeference
 	original, err := gdal.Open(inputdataset, gdal.ReadOnly)
 	if err != nil {
 		log.Fatal(err)
-		return err
+		return nil, 0, err
 	}
 	defer original.Close()
 
 	rastersize := original.RasterXSize()
 
+	//TODO(specki) Copy Georeference to new Dataset
 	//fmt.Println(original.GeoTransform())
 	//fmt.Print(original.ProjectionRef())
+	// original.
 
 	driver, err := gdal.GetDriverByName("GTiff")
 	if err != nil {
 		log.Fatal(err)
-		return err
+		return nil, 0, err
 	}
+
 	newdataset := driver.Create(
-		"test.tif",
+		outputdataset,
 		rastersize,
 		rastersize,
-		3,
+		bandcount,
 		gdal.Byte,
 		[]string{"INTERLEAVE=BAND"})
-	defer newdataset.Close()
 
+	newdataset.SetGeoTransform(original.GeoTransform())
+	newdataset.SetProjection(original.ProjectionRef())
+	return newdataset, rastersize, nil
+}
+
+
+//TODO(specki) Images with different resolutions
+func writeGeoTIFF_RGB(
+	inputdataset string,
+	red, green, blue []uint16,
+	minred, maxred, mingreen, maxgreen, minblue, maxblue float64,
+) error {
+	defer Timetrack(time.Now(), "WriteGeoTIFF: ")
+
+	//TODO(specki) replace tmp with dataset id
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp.tif",3)
+	if err != nil{
+		log.Fatal(err)
+		return err
+	}
 	// Calculate current value ranges
 	deltared := sliceDelta(red)
 	deltagreen := sliceDelta(green)
@@ -155,6 +215,7 @@ func writeGeoTIFF(
 		0,
 		0,
 	)
+	newdataset.Close()
 	return nil
 }
 
@@ -169,4 +230,10 @@ func sliceDelta(slice []uint16) (delta float64) {
 		}
 	}
 	return float64(max - min)
+}
+
+//TODO(specki)
+// Creates a unique id to index a specific cached dataset
+func createID() {
+
 }
