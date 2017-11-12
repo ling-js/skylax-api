@@ -16,7 +16,7 @@ import (
 )
 
 func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	defer Timetrack(time.Now(), "SearchHandler")
+	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()
 	datasets, err := ioutil.ReadDir("/opt/sentinel2")
 	if err != nil {
@@ -56,12 +56,31 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 		metaDataFilter(datasets, q.Get("startdate"), q.Get("enddate"), bbox, filterDates, filterBox)
 	}
 
+	// Prepare metadata output
 	var metadatachannel = make(chan []string, 8)
 	metadatajson := []byte("[")
 
-	metadatacounter, _ := getMetaData(datasets, 0, metadatachannel)
+	// Get page from URL
+	pagestring := q.Get("page")
+	page := 0
+	if pagestring != "" {
+		page, err = strconv.Atoi(pagestring)
+		if err != nil {
+			log.Fatal("Unable to parse Page Info ", err)
+			w.WriteHeader(400)
+			w.Write([]byte(err.Error()))
+		}
+	}
 
-	// Convert String slice to correct json
+	// Get metadata
+	metadatacounter, err := getMetaData(datasets, page, metadatachannel)
+	if err != nil {
+		log.Fatal("Unable to retrieve metadata ", err)
+		w.WriteHeader(500)
+		w.Write([]byte(err.Error()))
+	}
+
+	// Convert String slice to json
 	for i := 0; i < metadatacounter; i++ {
 		fields := make(map[string]string)
 		a := <-metadatachannel
@@ -79,13 +98,13 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 	}
 
 	metadatajson = append(metadatajson, []byte("]")...)
+
 	// Write Response with default 200 OK Status Code
 	w.Write(metadatajson)
 }
 
 // nameFilter sets all Elements in datasets to nil when string does not match
-func nameFilter(datasets []os.FileInfo, name string) {
-	defer Timetrack(time.Now(), "nameFilter")
+func nameFilter(datasets []os.FileInfo,	name string) {
 	for index := range datasets {
 		match, _ := regexp.MatchString(name, datasets[index].Name())
 		if !match {
@@ -96,7 +115,6 @@ func nameFilter(datasets []os.FileInfo, name string) {
 
 // metaDataFilter sets all Elements in datasets to nil when generationTime is not withing bounds set by startDate and endDate or does not intersect bbox.
 func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbox *geos.Geometry, filterDates, filterBox bool) error {
-	defer Timetrack(time.Now(), "metaDataFilter")
 	var startDate, endDate time.Time
 	if filterDates {
 		var err, err2 error
@@ -157,7 +175,7 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 }
 
 // Gets the metaData for cap(metadata) items starting with element page*cap(metadata).
-func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (int, error) {
+func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (metadatacount int, error error) {
 	// Total counts of elements found in datasets
 	totalcounter := 0
 	// Number of Elements pushed into channel
@@ -169,16 +187,18 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (int,
 		if datasets[index] != nil {
 			if metadatacounter == pagesize {
 				// Pushed all to channel
-				return 0, nil
+				return metadatacounter, nil
 			}
 			totalcounter++
 			// Push to metadata if on correct page and not already full
 			if totalcounter > page*pagesize && metadatacounter < pagesize {
 				metadatacounter++
-				dataset, err := gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
+				dataset, err := gdal.Open(
+					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
+					gdal.ReadOnly)
 				if err != nil {
 					log.Fatal(err)
-					return 0, err
+					return metadatacounter, err
 				}
 				metadata <- dataset.Metadata("")
 				dataset.Close()
