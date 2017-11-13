@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"github.com/julienschmidt/httprouter"
-	"github.com/ksshannon/go-gdal"
+	"github.com/ling-js/go-gdal"
 	"github.com/paulsmith/gogeos/geos"
 	"io/ioutil"
 	"log"
@@ -95,16 +95,18 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 			w.Write([]byte(err.Error()))
 		}
 		metadatajson = append(metadatajson, jsonstring...)
+		metadatajson = append(metadatajson, []byte(",")...)
 	}
 
-	metadatajson = append(metadatajson, []byte("]")...)
+	// replace last commata with ] to create valid json Array
+	metadatajson[len(metadatajson)-1] = byte(']')
 
 	// Write Response with default 200 OK Status Code
 	w.Write(metadatajson)
 }
 
 // nameFilter sets all Elements in datasets to nil when string does not match
-func nameFilter(datasets []os.FileInfo,	name string) {
+func nameFilter(datasets []os.FileInfo, name string) {
 	for index := range datasets {
 		match, _ := regexp.MatchString(name, datasets[index].Name())
 		if !match {
@@ -132,8 +134,8 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			return err
 		}
 		// Get Metadata
-		generationTimeRAW := dataset.MetadataItem("GENERATION_TIME", "")
-		footprintRAW := dataset.MetadataItem("FOOTPRINT", "")
+		generationTimeRAW := dataset.Driver().MetadataItem("GENERATION_TIME", "")
+		footprintRAW := dataset.Driver().MetadataItem("FOOTPRINT", "")
 
 		if filterDates {
 			// Conversion to usable Time
@@ -200,7 +202,7 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 					log.Fatal(err)
 					return metadatacounter, err
 				}
-				metadata <- dataset.Metadata("")
+				metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
 				dataset.Close()
 			}
 		}

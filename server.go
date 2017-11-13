@@ -10,5 +10,6 @@ import (
 func main() {
 	router := httprouter.New()
 	router.GET("/search", SearchHandler)
-	log.Fatal(http.ListenAndServe(":1337", router))
+	router.POST("/generate", GenerateHandler)
+	log.Fatal(http.ListenAndServe(":8081", router))
 }

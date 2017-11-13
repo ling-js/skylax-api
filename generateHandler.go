@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/ksshannon/go-gdal"
+	"github.com/gorilla/schema"
+	"github.com/julienschmidt/httprouter"
+	"github.com/ling-js/go-gdal"
 	"log"
+	"net/http"
 	"time"
 )
 
@@ -13,9 +16,47 @@ func Timetrack(start time.Time, name string) {
 	fmt.Printf("%s took %s\n", name, elapsed)
 }
 
-func main3() {
-	defer Timetrack(time.Now(), "main")
+type options struct {
+	dn      string
+	gsc     string
+	rcn     string
+	gcn     string
+	bcn     string
+	greymin int
+	rcmin   int
+	gcmin   int
+	bcmin   int
+	greymax int
+	rcmax   int
+	gcmax   int
+	bcmax   int
+}
 
+func parseOptions(r *http.Request) (options options, err error) {
+	err = r.ParseForm()
+	if err != nil {
+		log.Fatal(err)
+		//TODO(specki) return http error response
+	}
+	decoder := schema.NewDecoder()
+	err = decoder.Decode(&options, r.PostForm)
+	if err != nil {
+		log.Fatal(err)
+		//TODO (specki) return http error response
+	}
+
+	return options, nil
+}
+
+func GenerateHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+	defer Timetrack(time.Now(), "GenerateHandler ")
+
+	options, err := parseOptions(r)
+	if err != nil {
+		log.Fatal(err)
+		//TODO(specki) return http error response
+	}
+	fmt.Println(options)
 	//DEBUG ONLY
 	filename := "SENTINEL2_L1C:S2A_MSIL1C_20171019T111051_N0205_R137_T31UCT_20171019T111235.SAFE/MTD_MSIL1C.xml:10m:EPSG_32631"
 
@@ -44,6 +85,13 @@ func ReadDataFromDataset(bandnumber int, filename string, ch chan []uint16) erro
 		log.Fatal(err)
 		return err
 	}
+
+	//TODO(specki)
+	// map bandname to appropiate bandnumber
+	layer, err := dataset.RasterBand(1)
+	asdf := layer.Metadata("")
+	fmt.Println(asdf)
+
 	// defer closing until function exit
 	defer dataset.Close()
 	// get dimensions
@@ -82,8 +130,8 @@ func writeGeoTIFF_GREY(
 	mingrey, maxgrey float64,
 ) error {
 	//TODO(specki) replace tmp with dataset id
-	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp",3)
-	if err != nil{
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp", 3)
+	if err != nil {
 		log.Fatal(err)
 		return err
 	}
@@ -157,7 +205,6 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 	return newdataset, rastersize, nil
 }
 
-
 //TODO(specki) Images with different resolutions
 func writeGeoTIFF_RGB(
 	inputdataset string,
@@ -167,8 +214,8 @@ func writeGeoTIFF_RGB(
 	defer Timetrack(time.Now(), "WriteGeoTIFF: ")
 
 	//TODO(specki) replace tmp with dataset id
-	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp.tif",3)
-	if err != nil{
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, "tmp.tif", 3)
+	if err != nil {
 		log.Fatal(err)
 		return err
 	}
