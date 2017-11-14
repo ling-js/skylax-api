@@ -16,3 +16,5 @@
 # IDEA files
 .idea/
 
+# Test Datasets
+*.SAFE
