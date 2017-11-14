@@ -80,6 +80,10 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 		w.Write([]byte(err.Error()))
 	}
 
+	if metadatacounter == 0 {
+		metadatajson = append(metadatajson, []byte(",")...)
+	}
+
 	// Convert String slice to json
 	for i := 0; i < metadatacounter; i++ {
 		fields := make(map[string]string)
