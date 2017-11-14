@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"strings"
 )
 
 // Tracks the time elapsed since start.
@@ -62,11 +63,11 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 
 	ch := make(chan []uint16, 3)
 
-	go ReadDataFromDataset(1, filename, ch)
+	go ReadDataFromDataset("B3", filename, ch)
 	a := <-ch
-	go ReadDataFromDataset(2, filename, ch)
+	go ReadDataFromDataset("B2", filename, ch)
 	b := <-ch
-	go ReadDataFromDataset(3, filename, ch)
+	go ReadDataFromDataset("B8", filename, ch)
 	c := <-ch
 
 	// defer Timetrack(time.Now(), "go routine started")
@@ -76,8 +77,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params
 }
 
 // TODO(specki) refactor to load multiple bands if they are in same subdataset instead of loading them seperately
-// TODO(specki) Bandname (B02) to bandnumber (1-indexed)
-func ReadDataFromDataset(bandnumber int, filename string, ch chan []uint16) error {
+func ReadDataFromDataset(bandname, filename string, ch chan []uint16) error {
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 	// Open Dataset via GDAL
 	dataset, err := gdal.Open(filename, gdal.ReadOnly)
@@ -86,11 +86,25 @@ func ReadDataFromDataset(bandnumber int, filename string, ch chan []uint16) erro
 		return err
 	}
 
-	//TODO(specki)
 	// map bandname to appropiate bandnumber
-	layer, err := dataset.RasterBand(1)
-	asdf := layer.Metadata("")
-	fmt.Println(asdf)
+	rasterbands := dataset.RasterCount()
+	var bandnumber int
+	for i := 1; i <= rasterbands; i++ {
+		layer, err := dataset.RasterBand(i)
+		if err != nil {
+			log.Fatal(err)
+			return err
+		}
+		bandstring := strings.Split(layer.Metadata("")[0], "=")
+		if bandstring[1] == bandname {
+			bandnumber = i
+		}
+	}
+	// check if bandnumber is valid - else invalid bandname was supplied
+	if bandnumber == 0 {
+		log.Fatal()
+		return err
+	}
 
 	// defer closing until function exit
 	defer dataset.Close()
