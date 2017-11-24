@@ -6,7 +6,6 @@ import (
 	"github.com/ling-js/go-gdal"
 	"github.com/paulsmith/gogeos/geos"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -20,7 +19,9 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 	q := r.URL.Query()
 	datasets, err := ioutil.ReadDir("/opt/sentinel2")
 	if err != nil {
-		log.Fatal("unable to read data directory ", err)
+		w.WriteHeader(500)
+		w.Write([]byte("Unable to open Data Repository: " + err.Error()))
+		return
 	}
 
 	bboxstring := q.Get("bbox")
@@ -35,16 +36,24 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 		ur1, err4 := strconv.ParseFloat(coordinates[2], 64)
 		ur2, err5 := strconv.ParseFloat(coordinates[3], 64)
 
-		bbox, err = geos.NewPolygon([]geos.Coord{geos.NewCoord(ll1, ll2), geos.NewCoord(ur1, ur2)})
+		bbox, err = geos.NewLinearRing(
+			geos.NewCoord(ll1, ll2),
+			geos.NewCoord(ll1, ur2),
+			geos.NewCoord(ur1, ll2),
+			geos.NewCoord(ur1, ll2))
 		if err != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
-			log.Fatal("Failed to parse bounding box ", err, err2, err3, err4, err5)
 			w.WriteHeader(400)
-			w.Write([]byte(err.Error()))
+			w.Write([]byte(err.Error() + err2.Error() + err3.Error() + err4.Error() + err5.Error()))
+			return
 		}
 	}
 	// Filter by Name
-	nameFilter(datasets, q.Get("substring"))
-
+	err = nameFilter(datasets, q.Get("substring"))
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Unable to filter by substring: " + err.Error()))
+		return
+	}
 	// Filter by bbox, startDate, endDate
 	startDate := q.Get("startdate")
 	endDate := q.Get("enddate")
@@ -53,7 +62,12 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 
 	// Only Filter if filters are supplied
 	if filterDates || filterBox {
-		metaDataFilter(datasets, q.Get("startdate"), q.Get("enddate"), bbox, filterDates, filterBox)
+		err = metaDataFilter(datasets, q.Get("startdate"), q.Get("enddate"), bbox, filterDates, filterBox)
+		if err != nil {
+			w.WriteHeader(500)
+			w.Write([]byte("Unable to filter by metadata: " + err.Error()))
+			return
+		}
 	}
 
 	// Prepare metadata output
@@ -66,20 +80,21 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 	if pagestring != "" {
 		page, err = strconv.Atoi(pagestring)
 		if err != nil {
-			log.Fatal("Unable to parse Page Info ", err)
 			w.WriteHeader(400)
-			w.Write([]byte(err.Error()))
+			w.Write([]byte("Unable to get page parameter from URL: " + err.Error()))
+			return
 		}
 	}
 
 	// Get metadata
 	metadatacounter, err := getMetaData(datasets, page, metadatachannel)
 	if err != nil {
-		log.Fatal("Unable to retrieve metadata ", err)
 		w.WriteHeader(500)
-		w.Write([]byte(err.Error()))
+		w.Write([]byte("Unable to retrieve Metadata " + err.Error()))
+		return
 	}
 
+	// Edge Case where length of returned Array is 0
 	if metadatacounter == 0 {
 		metadatajson = append(metadatajson, []byte(",")...)
 	}
@@ -94,9 +109,9 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 		}
 		jsonstring, err := json.Marshal(fields)
 		if err != nil {
-			log.Fatal(err)
 			w.WriteHeader(500)
 			w.Write([]byte(err.Error()))
+			return
 		}
 		metadatajson = append(metadatajson, jsonstring...)
 		metadatajson = append(metadatajson, []byte(",")...)
@@ -110,13 +125,17 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 }
 
 // nameFilter sets all Elements in datasets to nil when string does not match
-func nameFilter(datasets []os.FileInfo, name string) {
+func nameFilter(datasets []os.FileInfo, name string) error {
 	for index := range datasets {
-		match, _ := regexp.MatchString(name, datasets[index].Name())
+		match, err := regexp.MatchString(name, datasets[index].Name())
+		if err != nil {
+			return err
+		}
 		if !match {
 			datasets[index] = nil
 		}
 	}
+	return nil
 }
 
 // metaDataFilter sets all Elements in datasets to nil when generationTime is not withing bounds set by startDate and endDate or does not intersect bbox.
@@ -126,15 +145,16 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		var err, err2 error
 		startDate, err = time.Parse(time.RFC3339, startDateRAW)
 		endDate, err2 = time.Parse(time.RFC3339, endDateRAW)
-		if err != nil || err2 != nil {
-			log.Fatal("Invalid startDate/endDate supplied ", err, err2)
+		if err != nil {
 			return err
+		}
+		if err2 != nil {
+			return err2
 		}
 	}
 	for index := range datasets {
 		dataset, err := gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
 		if err != nil {
-			log.Fatal(err)
 			return err
 		}
 		// Get Metadata
@@ -145,7 +165,6 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			// Conversion to usable Time
 			generationTime, err := time.Parse(time.RFC3339, generationTimeRAW)
 			if err != nil {
-				log.Fatal(err)
 				return err
 			}
 			// Check if Dataset Generation Time is between specified Dates
@@ -158,14 +177,12 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			// Convert to usable Geometry
 			footprint, err := geos.FromWKT(footprintRAW)
 			if err != nil {
-				log.Fatal(err)
 				return err
 			}
 
 			// Check if Dataset overlaps with bbox
 			intersects, err := footprint.Intersects(bbox)
 			if err != nil {
-				log.Fatal(err)
 				return err
 			}
 			// Check if Dataset Generation Time is between specified Dates
@@ -173,7 +190,6 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 				datasets[index] = nil
 			}
 		}
-
 		// Close Dataset
 		dataset.Close()
 	}
@@ -203,7 +219,6 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
 					gdal.ReadOnly)
 				if err != nil {
-					log.Fatal(err)
 					return metadatacounter, err
 				}
 				metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
