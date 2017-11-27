@@ -54,7 +54,7 @@ func parseOptions(r *http.Request) (options options, err error) {
 	return options, nil
 }
 
-func GenerateHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "GenerateHandler ")
 
 	options, err := parseOptions(r)
