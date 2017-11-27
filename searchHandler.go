@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/julienschmidt/httprouter"
 	"github.com/ling-js/go-gdal"
 	"github.com/paulsmith/gogeos/geos"
 	"io/ioutil"
@@ -14,7 +13,7 @@ import (
 	"time"
 )
 
-func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()
 	datasets, err := ioutil.ReadDir("/opt/sentinel2")
@@ -121,6 +120,7 @@ func SearchHandler(w http.ResponseWriter, r *http.Request, _ httprouter.Params) 
 	metadatajson[len(metadatajson)-1] = byte(']')
 
 	// Write Response with default 200 OK Status Code
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Write(metadatajson)
 }
 
