@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/gorilla/schema"
-	"github.com/julienschmidt/httprouter"
 	"github.com/ling-js/go-gdal"
 	"github.com/pkg/errors"
 	"net/http"
