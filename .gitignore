@@ -18,3 +18,9 @@
 
 # Test Datasets
 *.SAFE
+
+# Temporary Files&folders
+data/*
+*.tif
+data/
+dist/

@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/schema"
 	"github.com/ling-js/go-gdal"
 	"github.com/pkg/errors"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,24 +20,25 @@ func Timetrack(start time.Time, name string) {
 }
 
 type options struct {
-	rgbbool bool
-	id      string
-	gscdn   string
-	rcdn    string
-	gcdn    string
-	bcdn    string
-	gsc     string
-	rcn     string
-	gcn     string
-	bcn     string
-	greymin float64
-	rcmin   float64
-	gcmin   float64
-	bcmin   float64
-	greymax float64
-	rcmax   float64
-	gcmax   float64
-	bcmax   float64
+	Rgbbool bool `schema:"rgbbool"`
+	id      string  `schema:"-"`
+	AgeInputName string `schema:"ageInputName"`
+	Gscdn   string `schema:"gscdn"`
+	Rcdn    string `schema:"rcdn"`
+	Gcdn    string `schema:"gcdn"`
+	Bcdn    string `schema:"bcdn"`
+	Gsc     string `schema:"gsc"`
+	Rcn     string  `schema:"rcn"`
+	Gcn     string `schema:"gcn"`
+	Bcn     string	 `schema:"bcn"`
+	Greymin float64 `schema:"greymin"`
+	Rcmin   float64 `schema:"rcmin"`
+	Gcmin   float64 `schema:"gcmin"`
+	Bcmin   float64 `schema:"bcmin"`
+	Greymax float64 `schema:"greymax"`
+	Rcmax   float64 `schema:"rcmax"`
+	Gcmax   float64 `schema:"gcmax"`
+	Bcmax   float64 `schema:"bcmax"`
 }
 
 func parseOptions(r *http.Request) (options options, err error) {
@@ -57,70 +59,82 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "GenerateHandler ")
 
 	options, err := parseOptions(r)
+
 	if err != nil {
 		w.WriteHeader(400)
 		w.Write([]byte("Unable to parse parameters: " + err.Error()))
 		return
 	}
 
-	//DEBUG ONLY
-	options.rgbbool = true
-	options.rcdn = "SENTINEL2_L1C:S2A_MSIL1C_20171019T111051_N0205_R137_T31UCT_20171019T111235.SAFE/MTD_MSIL1C.xml:10m:EPSG_32631"
-	options.gcdn = "SENTINEL2_L1C:S2A_MSIL1C_20171019T111051_N0205_R137_T31UCT_20171019T111235.SAFE/MTD_MSIL1C.xml:10m:EPSG_32631"
-	options.bcdn = "SENTINEL2_L1C:S2A_MSIL1C_20171019T111051_N0205_R137_T31UCT_20171019T111235.SAFE/MTD_MSIL1C.xml:10m:EPSG_32631"
-	options.rcn = "B8"
-	options.gcn = "B8"
-	options.bcn = "B8"
-	options.rcmin = 0
-	options.gcmin = 0
-	options.bcmin = 0
-	options.rcmax = 13000
-	options.gcmax = 13000
-	options.bcmax = 13000
-
-	if options.rgbbool {
+	if options.Rgbbool {
+		//TODO(specki): refactor into goroutines or refactor to pointers instead of channels
 		ch := make(chan []uint16, 3)
 		// Read source data
-		err = ReadDataFromDataset(options.rcn, options.rcdn, ch, w)
+		err = ReadDataFromDataset(options.Rcn, options.Rcdn, ch, w)
 		r := <-ch
 		if err != nil {
 			return
 		}
-		err = ReadDataFromDataset(options.gcn, options.gcdn, ch, w)
+		err = ReadDataFromDataset(options.Gcn, options.Gcdn, ch, w)
 		g := <-ch
 		if err != nil {
 			return
 		}
-		err = ReadDataFromDataset(options.bcn, options.bcdn, ch, w)
+		err = ReadDataFromDataset(options.Bcn, options.Bcdn, ch, w)
 		b := <-ch
 		if err != nil {
 			return
 		}
 
-		//TODO(specki) different scales!
 		err = writeGeoTIFF_RGB(
-			options.gcdn, // copy georeference
+			options.Gcdn, // copy georeference
 			options.id+".tif",
 			r,
 			g,
 			b,
-			options.rcmin,
-			options.rcmax,
-			options.gcmin,
-			options.gcmax,
-			options.bcmin,
-			options.bcmax)
+			options.Rcmin,
+			options.Rcmax,
+			options.Gcmin,
+			options.Gcmax,
+			options.Bcmin,
+			options.Bcmax)
 		if err != nil {
 			w.WriteHeader(500)
 			w.Write([]byte("Unable to generate RGB image: " + err.Error()))
 			return
 		}
 	} else {
-		//TODO same thing for greyscale images
+		ch := make(chan []uint16, 1)
+		// Read source data
+		err = ReadDataFromDataset(options.Gsc, options.Gscdn, ch, w)
+		g := <-ch
+		if err != nil {
+			return
+		}
+		err = writeGeoTIFF_GREY(
+			options.Gscdn,
+			options.id+".tif",
+			g,
+			options.Greymin,
+			options.Greymax)
+
+		if err != nil {
+			w.WriteHeader(500)
+			w.Write([]byte("Unable to generate Greyscale image: " + err.Error()))
+			return
+		}
+	}
+
+	// calculate correct NODATA values
+	var nodata string
+	if options.Rgbbool {
+		nodata = "0,0,0"
+	} else {
+		nodata = "0"
 	}
 
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./gdal2tiles_parallel.py", "-e", "-p", "raster", "--format=PNG", "--processes=16", options.id+".tif", "data/"+options.id+"/")
+	cmd := exec.Command("./DEV_gdal2tiles.py","--resume", "-w", "none", "-a", nodata, "-s", "EPSG:32631", options.id+".tif", "data/"+options.id+"/")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -203,24 +217,13 @@ func writeGeoTIFF_GREY(
 	grey []uint16,
 	mingrey, maxgrey float64,
 ) error {
-	newdataset, rastersize, err := createGeoTIFF(inputdataset, outputdataset, 3)
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, outputdataset, 1)
 	if err != nil {
 		return err
 	}
-	// Calculate current value ranges
-	deltagrey := sliceDelta(grey)
 
-	// 8bit data
 	var data8bit = make([]byte, len(grey))
-
-	// Convert uint16 Data to 8bit
-	for i := 0; i < len(grey); i++ {
-		g := float64(grey[i])
-		if g < mingrey || maxgrey < g {
-			g = 0
-		}
-		data8bit[i] = (byte)((g / deltagrey) * 255)
-	}
+	transformColorValues(data8bit, grey, maxgrey, mingrey, len(grey))
 
 	newdataset.IO(
 		gdal.Write,
@@ -267,10 +270,74 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 
 	newdataset.SetGeoTransform(original.GeoTransform())
 	newdataset.SetProjection(original.ProjectionRef())
+
 	return newdataset, rastersize, nil
 }
 
-//TODO(specki) Images with different resolutions
+// transformColorValues transforms given 16-bit values into 8-bit values.
+// Linear transform unless original values are outside given bounds, then 0
+func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue float64, newsize int) {
+	delta := sliceDelta(data)
+	originalrowsize := int(math.Sqrt(float64(len(data))))
+	newrowsize := int(math.Sqrt(float64(newsize)))
+
+	var runnerX int
+	switch factor := (newrowsize - originalrowsize) / 1830; factor {
+	case 0:
+		runnerX = -999
+	case 2:
+		runnerX = 3
+	case 3:
+		runnerX = 2
+	case 5:
+		runnerX = 6
+	}
+
+	// Optimize if newscale is same as oldscale
+	if runnerX != -999 {
+		runnerdelta := runnerX
+		runner := originalrowsize
+		runnerY := runnerdelta + 1
+
+		for i := 0; i < newsize; i++ {
+			// Row has finished - increment runner in Y direction
+			if i%newrowsize == 0 {
+				runnerY--
+				runner = runner - originalrowsize
+			}
+			// Reset Y runner once delta is reached (counting up from delta)
+			if runnerY == 0 {
+				runnerY = runnerdelta
+			}
+			// Reset X runner once 0 is reached (counting down from delta)
+			if runnerX == 0 {
+				runner++
+				runnerX = runnerdelta
+			}
+			// get original data
+			c := float64(data[runner])
+			//
+			runnerX--
+			// check if value is within bounds
+			if c < minvalue || maxvalue < c {
+				c = 0
+			}
+			// transform to 0-255 space
+			output[i] = (byte)((c / delta) * 255)
+		}
+	} else {
+		for i := 0; i < newsize; i++ {
+			c := float64(data[i])
+			// check if value is within bounds
+			if c < minvalue || maxvalue < c {
+				c = 0
+			}
+			// transform to 0-255 space
+			output[i] = (byte)((c / delta) * 255)
+		}
+	}
+}
+
 func writeGeoTIFF_RGB(
 	inputdataset, outputdataset string,
 	red, green, blue []uint16,
@@ -282,33 +349,28 @@ func writeGeoTIFF_RGB(
 	if err != nil {
 		return err
 	}
-	// Calculate current value ranges
-	deltared := sliceDelta(red)
-	deltagreen := sliceDelta(green)
-	deltablue := sliceDelta(blue)
 
 	// 8bit data
-	var data8bit = make([]byte, len(red)*3)
-	offset := len(red)
+	var data8bit = make([]byte, 361681200)
 
-	// Convert uint16 Data to 8bit
-	for i := 0; i < len(red); i++ {
-		r := float64(red[i])
-		g := float64(green[i])
-		b := float64(blue[i])
-		if r < minred || maxred < r {
-			r = 0
-		}
-		if g < mingreen || maxgreen < g {
-			g = 0
-		}
-		if b < minblue || maxblue < b {
-			b = 0
-		}
-		data8bit[i] = (byte)((r / deltared) * 255)
-		data8bit[i+offset] = (byte)((g / deltagreen) * 255)
-		data8bit[i+(2*offset)] = (byte)((b / deltablue) * 255)
+	// get size of dataset with highest resolution
+	maxresolution := 0
+	lenblue := len(blue)
+	lenred := len(red)
+	lengreen := len(green)
+
+	if lenred > lengreen && lenred > lenblue {
+		maxresolution = lenred
+	} else if lengreen > lenred && lengreen > lenblue {
+		maxresolution = lengreen
+	} else {
+		maxresolution = lenblue
 	}
+
+	// for red channel
+	transformColorValues(data8bit[:120560400], red, maxred, minred, maxresolution)
+	transformColorValues(data8bit[120560400:241120800], green, maxgreen, mingreen, maxresolution)
+	transformColorValues(data8bit[241120800:], blue, maxblue, minblue, maxresolution)
 
 	newdataset.IO(
 		gdal.Write,
@@ -330,6 +392,7 @@ func writeGeoTIFF_RGB(
 }
 
 // sliceDelta return the difference between largest and smallest number in slice
+//TODO(specki): Maybe refactor to use ComputeMinMax() of GDAL Rasterband
 func sliceDelta(slice []uint16) (delta float64) {
 	var min, max uint16
 	for _, element := range slice {

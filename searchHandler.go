@@ -86,12 +86,15 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get metadata
-	metadatacounter, err := getMetaData(datasets, page, metadatachannel)
+	metadatacounter, totalcounter, err := getMetaData(datasets, page, metadatachannel)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Unable to retrieve Metadata " + err.Error()))
 		return
 	}
+
+	// Write max page into response Headers
+	w.Header().Set("X-Dataset-Count", strconv.Itoa(totalcounter))
 
 	// Edge Case where length of returned Array is 0
 	if metadatacounter == 0 {
@@ -197,9 +200,9 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 }
 
 // Gets the metaData for cap(metadata) items starting with element page*cap(metadata).
-func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (metadatacount int, error error) {
+func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (metadatacount, totalcounter int, error error) {
 	// Total counts of elements found in datasets
-	totalcounter := 0
+	totalcounter = 0
 	// Number of Elements pushed into channel
 	metadatacounter := 0
 	pagesize := cap(metadata)
@@ -209,7 +212,7 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 		if datasets[index] != nil {
 			if metadatacounter == pagesize {
 				// Pushed all to channel
-				return metadatacounter, nil
+				return metadatacounter, 0, nil
 			}
 			totalcounter++
 			// Push to metadata if on correct page and not already full
@@ -219,12 +222,12 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
 					gdal.ReadOnly)
 				if err != nil {
-					return metadatacounter, err
+					return metadatacounter, 0, err
 				}
 				metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
 				dataset.Close()
 			}
 		}
 	}
-	return metadatacounter, nil
+	return metadatacounter, totalcounter, nil
 }
