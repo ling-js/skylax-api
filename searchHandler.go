@@ -30,20 +30,27 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Check if bbox is supplied
 	if bboxstring != "" {
 		coordinates := strings.Split(bboxstring, ",")
-		// Create geometry from bbox
-		ll1, err2 := strconv.ParseFloat(coordinates[0], 64)
-		ll2, err3 := strconv.ParseFloat(coordinates[1], 64)
-		ur1, err4 := strconv.ParseFloat(coordinates[2], 64)
-		ur2, err5 := strconv.ParseFloat(coordinates[3], 64)
 
-		bbox, err = geos.NewLinearRing(
-			geos.NewCoord(ll1, ll2),
-			geos.NewCoord(ll1, ur2),
-			geos.NewCoord(ur1, ll2),
-			geos.NewCoord(ur1, ll2))
-		if err != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
+		polygon :=
+			"POLYGON((" +
+				coordinates[0] + " " +
+				coordinates[1] + "," +
+				coordinates[0] + " " +
+				coordinates[3] + "," +
+				coordinates[2] + " " +
+				coordinates[3] + "," +
+				coordinates[1] + " " +
+				coordinates[2] + "," +
+				coordinates[0] + " " +
+				coordinates[1] + "))"
+
+		bbox, err = geos.FromWKT(polygon)
+		if err != nil {
 			w.WriteHeader(400)
-			w.Write([]byte(err.Error() + err2.Error() + err3.Error() + err4.Error() + err5.Error()))
+			if Verbose {
+				fmt.Println(err)
+			}
+			w.Write([]byte(err.Error()))
 			return
 		}
 	}
@@ -187,8 +194,12 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 				return err
 			}
 
+			fmt.Println(bbox)
+			fmt.Println(footprint)
+
 			// Check if Dataset overlaps with bbox
 			intersects, err := footprint.Intersects(bbox)
+			fmt.Println(intersects)
 			if err != nil {
 				return err
 			}
