@@ -2494,19 +2494,35 @@ class GDAL2Tiles(object):
         return s
 
 
+def worker_metadata(argv):
+    stdout.flush()
+    print("\tStart of metadata worker.")
+    gdal2tiles = GDAL2Tiles(argv[1:])
+    gdal2tiles.open_input()
+    gdal2tiles.generate_metadata()
+    print("\tEnd of metadata worker.")
+
+
 def worker_base_tiles(argv, cpu):
     stdout.flush()
+    print("\tStart of base tile worker: " + str(cpu))
     gdal2tiles = GDAL2Tiles(argv[1:])
     gdal2tiles.open_input()
     gdal2tiles.generate_base_tiles(cpu)
     return cpu
 
 
+def worker_callback(cpu):
+    print("End of worker: " + str(cpu))
+
+
 def worker_overview_tiles(argv, cpu, tz):
     stdout.flush()
+    print("\tStart of overview tile worker: " + str(cpu) + ", zoom=" + str(tz))
     gdal2tiles = GDAL2Tiles(argv[1:])
     gdal2tiles.open_input()
     gdal2tiles.generate_overview_tiles(cpu, tz)
+    print("\tEnd of overview tile worker: " + str(cpu) + ", zoom=" + str(tz))
 
 
 def getZooms(gdal2tiles):
@@ -2519,21 +2535,53 @@ def main(argv=None):
     if argv:
         gdal2tiles = GDAL2Tiles(argv[1:])  # handle command line options
 
+        print("Begin metadata generation complete.")
+        p = Process(target=worker_metadata, args=[argv])
+        p.start()
+        p.join()
+        print("Metadata generation complete.")
+
         pool = Pool()
+        #processed_tiles = 0
+        print("Generating Base Tiles:")
         for cpu in range(gdal2tiles.options.processes):
             pool.apply_async(worker_base_tiles,
                              [argv, cpu],
-                             callback=None)
+                             callback=worker_callback)
         pool.close()
+        # This progress code does not work. The queue deadlocks the pool.join() call.
+        #while len(active_children()) != 0:
+        #   try:
+        #       total = queue.get(timeout=1)
+        #       processed_tiles += 1
+        #       gdal.TermProgress_nocb(processed_tiles / float(total))
+        #       stdout.flush()
+        #   except:
+        #       pass
         pool.join()
+        print("Base tile generation complete.")
 
+        #processed_tiles = 0
         tminz, tmaxz = getZooms(gdal2tiles)
+        print("Generating Overview Tiles:")
         for tz in range(tmaxz - 1, tminz - 1, -1):
+            print("\tGenerating for zoom level: " + str(tz))
             pool = Pool()
             for cpu in range(gdal2tiles.options.processes):
                 pool.apply_async(worker_overview_tiles, [argv, cpu, tz])
             pool.close()
+            #while len(active_children()) != 0:
+            #   try:
+            #       total = queue.get(timeout=1)
+            #       processed_tiles += 1
+            #       gdal.TermProgress_nocb(processed_tiles / float(total))
+            #       stdout.flush()
+            #   except:
+            #       pass
             pool.join()
+            print("\tZoom level " + str(tz) + " complete.")
+        print("Overview tile generation complete")
+
 
 
 if __name__ == '__main__':
