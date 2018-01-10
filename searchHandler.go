@@ -169,7 +169,10 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 	for index := range datasets {
 		dataset, err := gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
 		if err != nil {
-			return err
+			//TODO(specki): Temporaeres workaround fuer 2A datasets
+			datasets[index] = nil
+			return nil
+			// return err
 		}
 		// Get Metadata
 		generationTimeRAW := dataset.Metadata("")[12][16:]
@@ -194,12 +197,8 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 				return err
 			}
 
-			fmt.Println(bbox)
-			fmt.Println(footprint)
-
 			// Check if Dataset overlaps with bbox
 			intersects, err := footprint.Intersects(bbox)
-			fmt.Println(intersects)
 			if err != nil {
 				return err
 			}

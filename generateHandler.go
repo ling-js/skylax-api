@@ -22,6 +22,7 @@ func Timetrack(start time.Time, name string) {
 type options struct {
 	Rgbbool bool `schema:"rgbbool"`
 	id      string  `schema:"-"`
+	AgeInputName string `schema:"ageInputName"`
 	Gscdn   string `schema:"gscdn"`
 	Rcdn    string `schema:"rcdn"`
 	Gcdn    string `schema:"gcdn"`
