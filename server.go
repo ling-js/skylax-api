@@ -10,7 +10,7 @@ import (
 
 // Init global Variables
 var Ksuid = ksuid.New()
-
+var Verbose = true
 func main() {
 	router := httprouter.New()
 	router.HandlerFunc("GET", "/search", SearchHandler)

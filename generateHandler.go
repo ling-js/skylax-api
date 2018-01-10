@@ -16,7 +16,7 @@ import (
 // Tracks the time elapsed since start.
 func Timetrack(start time.Time, name string) {
 	elapsed := time.Since(start)
-	fmt.Printf("%s took %s\n", name, elapsed)
+	fmt.Printf("%s finished in %s\n", name, elapsed)
 }
 
 type options struct {
@@ -63,6 +63,11 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(400)
 		w.Write([]byte("Unable to parse parameters: " + err.Error()))
+
+		if Verbose {
+			fmt.Println("Error getting the Options from the Request")
+			fmt.Println(err.Error())
+		}
 		return
 	}
 
@@ -73,16 +78,28 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		err = ReadDataFromDataset(options.Rcn, options.Rcdn, ch, w)
 		r := <-ch
 		if err != nil {
+			if Verbose {
+				fmt.Println("Error reading red dataset")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 		err = ReadDataFromDataset(options.Gcn, options.Gcdn, ch, w)
 		g := <-ch
 		if err != nil {
+			if Verbose {
+				fmt.Println("Error reading green dataset")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 		err = ReadDataFromDataset(options.Bcn, options.Bcdn, ch, w)
 		b := <-ch
 		if err != nil {
+			if Verbose {
+				fmt.Println("Error reading blue dataset")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 
@@ -101,6 +118,10 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(500)
 			w.Write([]byte("Unable to generate RGB image: " + err.Error()))
+			if Verbose {
+				fmt.Println("Error writing data to temporary GeoTIFF File")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 	} else {
@@ -109,6 +130,10 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		err = ReadDataFromDataset(options.Gsc, options.Gscdn, ch, w)
 		g := <-ch
 		if err != nil {
+			if Verbose {
+				fmt.Println("Error reading grey dataset")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 		err = writeGeoTIFF_GREY(
@@ -121,6 +146,10 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			w.WriteHeader(500)
 			w.Write([]byte("Unable to generate Greyscale image: " + err.Error()))
+			if Verbose {
+				fmt.Println("Error writing data to temporary GeoTIFF File")
+				fmt.Println(err.Error())
+			}
 			return
 		}
 	}
@@ -134,7 +163,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./DEV_gdal2tiles.py","--resume", "-w", "none", "-a", nodata, "-s", "EPSG:32631", options.id+".tif", "data/"+options.id+"/")
+	cmd := exec.Command("./DEV_gdal2tiles.py","--resume", "--processes","16", "-z","6-15","-w", "none", "-a", nodata, "-s", "EPSG:32631", options.id+".tif", "data/"+options.id+"/")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -150,6 +179,10 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Error opening Dataset: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error opening Dataset by GDAL")
+			fmt.Println(err.Error())
+		}
 		ch <- make([]uint16, 0)
 		return err
 	}
@@ -161,7 +194,11 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 		layer, err := dataset.RasterBand(i)
 		if err != nil {
 			w.WriteHeader(500)
-			w.Write([]byte("Error reading rasterband from Dataset: " + err.Error()))
+			w.Write([]byte("Error reading rasterband from dataset: " + err.Error()))
+			if Verbose {
+				fmt.Println("Error reading rasterband from dataset")
+				fmt.Println(err.Error())
+			}
 			ch <- make([]uint16, 0)
 			return err
 		}
@@ -174,6 +211,9 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 	if bandnumber == 0 {
 		w.WriteHeader(400)
 		w.Write([]byte("Invalid Bandname supplied. Band '" + bandname + "' does not exist in Dataset " + filename))
+		if Verbose {
+			fmt.Println("Invalid Bandname supplied. Band '" + bandname + "' does not exist in Dataset " + filename)
+		}
 		ch <- make([]uint16, 0)
 		return errors.New("dummy")
 	}
@@ -203,6 +243,10 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Error reading data from Dataset: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error reading data from dataset")
+			fmt.Println(err.Error())
+		}
 		ch <- make([]uint16, 0)
 		return err
 	}
@@ -281,43 +325,48 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	originalrowsize := int(math.Sqrt(float64(len(data))))
 	newrowsize := int(math.Sqrt(float64(newsize)))
 
-	var runnerX int
+	var runnerdelta int
 	switch factor := (newrowsize - originalrowsize) / 1830; factor {
 	case 0:
-		runnerX = -999
+		runnerdelta = -999
 	case 2:
-		runnerX = 3
+		runnerdelta = 3
 	case 3:
-		runnerX = 2
+		runnerdelta = 2
 	case 5:
-		runnerX = 6
+		runnerdelta = 6
 	}
 
+
 	// Optimize if newscale is same as oldscale
-	if runnerX != -999 {
-		runnerdelta := runnerX
-		runner := originalrowsize
-		runnerY := runnerdelta + 1
+	if runnerdelta != -999 {
+		runner := 0
+		runnerY := runnerdelta
+		runnerX := runnerdelta
 
 		for i := 0; i < newsize; i++ {
-			// Row has finished - increment runner in Y direction
-			if i%newrowsize == 0 {
+			// Check if we are at end of line in matrix
+			if i%(newrowsize-1) == 0 && i != 0 {
 				runnerY--
-				runner = runner - originalrowsize
+				// If runnerY is zero reset runner to start of line
+				if runnerY != 0 {
+					runner = runner - originalrowsize
+					// Force X runner reset
+					runnerX = 0
+				} else {
+					runnerY = runnerdelta
+				}
 			}
-			// Reset Y runner once delta is reached (counting up from delta)
-			if runnerY == 0 {
-				runnerY = runnerdelta
-			}
+
 			// Reset X runner once 0 is reached (counting down from delta)
 			if runnerX == 0 {
 				runner++
 				runnerX = runnerdelta
 			}
+			runnerX--
+
 			// get original data
 			c := float64(data[runner])
-			//
-			runnerX--
 			// check if value is within bounds
 			if c < minvalue || maxvalue < c {
 				c = 0

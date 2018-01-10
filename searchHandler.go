@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"fmt"
 )
 
 func SearchHandler(w http.ResponseWriter, r *http.Request) {
@@ -95,6 +96,7 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Write max page into response Headers
 	w.Header().Set("X-Dataset-Count", strconv.Itoa(totalcounter))
+	w.Header().Set("Access-Control-Expose-Headers", "X-Dataset-Count")
 
 	// Edge Case where length of returned Array is 0
 	if metadatacounter == 0 {
@@ -149,10 +151,12 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		startDate, err = time.Parse(time.RFC3339, startDateRAW)
 		endDate, err2 = time.Parse(time.RFC3339, endDateRAW)
 		if err != nil {
+			fmt.Println(err)
 			return err
 		}
 		if err2 != nil {
 			return err2
+			fmt.Println(err2)
 		}
 	}
 	for index := range datasets {
@@ -161,8 +165,8 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			return err
 		}
 		// Get Metadata
-		generationTimeRAW := dataset.Driver().MetadataItem("GENERATION_TIME", "")
-		footprintRAW := dataset.Driver().MetadataItem("FOOTPRINT", "")
+		generationTimeRAW := dataset.Metadata("")[12][16:]
+		footprintRAW := dataset.Metadata("")[9][10:]
 
 		if filterDates {
 			// Conversion to usable Time
@@ -210,10 +214,11 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 	for index := range datasets {
 		// Fetch Metadata if Dataset is not sorted out + is on correct page
 		if datasets[index] != nil {
-			if metadatacounter == pagesize {
+			// Shortcircuit invalidates totalcounter needed for pagination
+			//if metadatacounter == pagesize {
 				// Pushed all to channel
-				return metadatacounter, 0, nil
-			}
+			//	return metadatacounter, totalcounter, nil
+			//}
 			totalcounter++
 			// Push to metadata if on correct page and not already full
 			if totalcounter > page*pagesize && metadatacounter < pagesize {
@@ -221,11 +226,19 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 				dataset, err := gdal.Open(
 					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
 					gdal.ReadOnly)
-				if err != nil {
+				dataset2, err2 := gdal.Open(
+					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml",
+					gdal.ReadOnly)
+				if err == nil {
+					metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
+					dataset.Close()
+				} else if err2 == nil {
+					// metadata <- append(dataset2.Metadata(""), dataset2.Metadata("Subdatasets")...)
+					metadata <- append([]string {"CLOUD_COVERAGE_ASSESSMENT=S2A IS NOT SUPPORTED YET"})
+					dataset2.Close()
+				} else {
 					return metadatacounter, 0, err
 				}
-				metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
-				dataset.Close()
 			}
 		}
 	}
