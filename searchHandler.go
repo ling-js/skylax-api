@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/ling-js/go-gdal"
 	"github.com/paulsmith/gogeos/geos"
 	"io/ioutil"
@@ -11,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"fmt"
 )
 
 func SearchHandler(w http.ResponseWriter, r *http.Request) {
@@ -158,26 +158,35 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		startDate, err = time.Parse(time.RFC3339, startDateRAW)
 		endDate, err2 = time.Parse(time.RFC3339, endDateRAW)
 		if err != nil {
-			fmt.Println(err)
 			return err
 		}
 		if err2 != nil {
 			return err2
-			fmt.Println(err2)
 		}
 	}
 	for index := range datasets {
-		dataset, err := gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
-		if err != nil {
-			//TODO(specki): Temporaeres workaround fuer 2A datasets
-			datasets[index] = nil
-			return nil
-			// return err
+		var generationTimeRAW, footprintRAW string
+		var dataset *gdal.Dataset
+		var err error
+		// Try to get L1C Metadata
+		dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
+		if err == nil {
+			// Get Metadata via hardcoded position
+			generationTimeRAW = dataset.Metadata("")[12][16:]
+			footprintRAW = dataset.Metadata("")[9][10:]
+		} else {
+			// Else Try to get S2A Metadata
+			dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml", gdal.ReadOnly)
+			if err == nil {
+				// Get Metadata via hardcoded position
+				generationTimeRAW = dataset.Metadata("")[17][16:]
+				footprintRAW = dataset.Metadata("")[14][10:]
+			} else {
+				return err
+			}
 		}
-		// Get Metadata
-		generationTimeRAW := dataset.Metadata("")[12][16:]
-		footprintRAW := dataset.Metadata("")[9][10:]
 
+		// Apply Date Filter if selected
 		if filterDates {
 			// Conversion to usable Time
 			generationTime, err := time.Parse(time.RFC3339, generationTimeRAW)
@@ -190,6 +199,7 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			}
 
 		}
+
 		if filterBox {
 			// Convert to usable Geometry
 			footprint, err := geos.FromWKT(footprintRAW)
@@ -226,28 +236,32 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 		if datasets[index] != nil {
 			// Shortcircuit invalidates totalcounter needed for pagination
 			//if metadatacounter == pagesize {
-				// Pushed all to channel
+			// Pushed all to channel
 			//	return metadatacounter, totalcounter, nil
 			//}
 			totalcounter++
 			// Push to metadata if on correct page and not already full
 			if totalcounter > page*pagesize && metadatacounter < pagesize {
 				metadatacounter++
+
+				// Try to open and read Metadata of L1C Dataset
 				dataset, err := gdal.Open(
 					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
-					gdal.ReadOnly)
-				dataset2, err2 := gdal.Open(
-					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml",
 					gdal.ReadOnly)
 				if err == nil {
 					metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
 					dataset.Close()
-				} else if err2 == nil {
-					// metadata <- append(dataset2.Metadata(""), dataset2.Metadata("Subdatasets")...)
-					metadata <- append([]string {"CLOUD_COVERAGE_ASSESSMENT=S2A IS NOT SUPPORTED YET"})
-					dataset2.Close()
 				} else {
-					return metadatacounter, 0, err
+					// Try to open and read Metadata of L2A Dataset
+					dataset, err := gdal.Open(
+						"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml",
+						gdal.ReadOnly)
+					if err == nil {
+						metadata <- dataset.Metadata("")
+						dataset.Close()
+					} else {
+						return metadatacounter, 0, err
+					}
 				}
 			}
 		}

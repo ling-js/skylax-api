@@ -3,14 +3,13 @@ package main
 import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/rs/cors"
-	"github.com/segmentio/ksuid"
 	"log"
 	"net/http"
 )
 
 // Init global Variables
-var Ksuid = ksuid.New()
 var Verbose = true
+
 func main() {
 	router := httprouter.New()
 	router.HandlerFunc("GET", "/search", SearchHandler)

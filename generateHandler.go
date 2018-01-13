@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/schema"
 	"github.com/ling-js/go-gdal"
 	"github.com/pkg/errors"
+	"github.com/segmentio/ksuid"
 	"math"
 	"net/http"
 	"os"
@@ -20,17 +21,16 @@ func Timetrack(start time.Time, name string) {
 }
 
 type options struct {
-	Rgbbool bool `schema:"rgbbool"`
+	Rgbbool bool    `schema:"rgbbool"`
 	id      string  `schema:"-"`
-	AgeInputName string `schema:"ageInputName"`
-	Gscdn   string `schema:"gscdn"`
-	Rcdn    string `schema:"rcdn"`
-	Gcdn    string `schema:"gcdn"`
-	Bcdn    string `schema:"bcdn"`
-	Gsc     string `schema:"gsc"`
+	Gscdn   string  `schema:"gscdn"`
+	Rcdn    string  `schema:"rcdn"`
+	Gcdn    string  `schema:"gcdn"`
+	Bcdn    string  `schema:"bcdn"`
+	Gsc     string  `schema:"gsc"`
 	Rcn     string  `schema:"rcn"`
-	Gcn     string `schema:"gcn"`
-	Bcn     string	 `schema:"bcn"`
+	Gcn     string  `schema:"gcn"`
+	Bcn     string  `schema:"bcn"`
 	Greymin float64 `schema:"greymin"`
 	Rcmin   float64 `schema:"rcmin"`
 	Gcmin   float64 `schema:"gcmin"`
@@ -43,6 +43,7 @@ type options struct {
 
 func parseOptions(r *http.Request) (options options, err error) {
 	err = r.ParseForm()
+
 	if err != nil {
 		return options, err
 	}
@@ -51,7 +52,12 @@ func parseOptions(r *http.Request) (options options, err error) {
 	if err != nil {
 		return options, err
 	}
-	options.id = Ksuid.Next().String()
+	var ksu, err2 = ksuid.NewRandom()
+	if err2 != nil {
+		return options, err
+	}
+
+	options.id = ksu.String()
 	return options, nil
 }
 
@@ -163,7 +169,8 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./DEV_gdal2tiles.py","--resume", "--processes","16", "-z","6-15","-w", "none", "-a", nodata, "-s", "EPSG:32631", options.id+".tif", "data/"+options.id+"/")
+	cmd := exec.Command("./DEV_gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
+	fmt.Println(cmd)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -336,7 +343,6 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	case 5:
 		runnerdelta = 6
 	}
-
 
 	// Optimize if newscale is same as oldscale
 	if runnerdelta != -999 {
