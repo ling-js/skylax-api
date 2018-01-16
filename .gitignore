@@ -12,3 +12,15 @@
 
 # Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
 .glide/
+
+# IDEA files
+.idea/
+
+# Test Datasets
+*.SAFE
+
+# Temporary Files&folders
+data/*
+*.tif
+data/
+dist/
