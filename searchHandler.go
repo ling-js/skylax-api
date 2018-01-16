@@ -77,10 +77,6 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Prepare metadata output
-	var metadatachannel = make(chan []string, 8)
-	metadatajson := []byte("[")
-
 	// Get page from URL
 	pagestring := q.Get("page")
 	page := 0
@@ -93,8 +89,11 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Prepare metadata output
+	var metadatajson []byte
+
 	// Get metadata
-	metadatacounter, totalcounter, err := getMetaData(datasets, page, metadatachannel)
+	mtdL1C, mtdL2A, totalcounter, err := getMetaData(datasets, page)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Unable to retrieve Metadata " + err.Error()))
@@ -105,31 +104,14 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Dataset-Count", strconv.Itoa(totalcounter))
 	w.Header().Set("Access-Control-Expose-Headers", "X-Dataset-Count")
 
-	// Edge Case where length of returned Array is 0
-	if metadatacounter == 0 {
-		metadatajson = append(metadatajson, []byte(",")...)
-	}
+	// Set content-type header
+	w.Header().Set("Content-Type", "application/json")
 
-	// Convert String slice to json
-	for i := 0; i < metadatacounter; i++ {
-		fields := make(map[string]string)
-		a := <-metadatachannel
-		for index := range a {
-			keyValuePair := strings.Split(a[index], "=")
-			fields[keyValuePair[0]] = keyValuePair[1]
-		}
-		jsonstring, err := json.Marshal(fields)
-		if err != nil {
-			w.WriteHeader(500)
-			w.Write([]byte(err.Error()))
-			return
-		}
-		metadatajson = append(metadatajson, jsonstring...)
-		metadatajson = append(metadatajson, []byte(",")...)
-	}
-
-	// replace last commata with ] to create valid json Array
-	metadatajson[len(metadatajson)-1] = byte(']')
+	// Create metadata
+	metadatajson = append(metadatajson, mtdL1C[:len(mtdL1C)-1]...)
+	metadatajson = append(metadatajson, []byte("],")...)
+	metadatajson = append(metadatajson, mtdL2A...)
+	metadatajson = append(metadatajson, []byte("]}")...)
 
 	// Write Response with default 200 OK Status Code
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -223,22 +205,23 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 	return nil
 }
 
-// Gets the metaData for cap(metadata) items starting with element page*cap(metadata).
-func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (metadatacount, totalcounter int, error error) {
+// Gets the metaData for 8 items starting with element page*8.
+func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []byte, totalcounter int, error error) {
+	// Start assembling Metadata
+	metadataL1C = []byte("{\"L1C\":[")
+	metadataL2A = []byte("\"L2A\":[")
+	// If L2A Dataset add additional Metadata
+	var L2A bool
 	// Total counts of elements found in datasets
 	totalcounter = 0
 	// Number of Elements pushed into channel
 	metadatacounter := 0
-	pagesize := cap(metadata)
+	// Number of Elements per Page
+	pagesize := 8
 
 	for index := range datasets {
 		// Fetch Metadata if Dataset is not sorted out + is on correct page
 		if datasets[index] != nil {
-			// Shortcircuit invalidates totalcounter needed for pagination
-			//if metadatacounter == pagesize {
-			// Pushed all to channel
-			//	return metadatacounter, totalcounter, nil
-			//}
 			totalcounter++
 			// Push to metadata if on correct page and not already full
 			if totalcounter > page*pagesize && metadatacounter < pagesize {
@@ -249,7 +232,8 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
 					gdal.ReadOnly)
 				if err == nil {
-					metadata <- append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...)
+					L2A = false
+					createJSON(append(dataset.Metadata(""), dataset.Metadata("Subdatasets")...), &metadataL1C)
 					dataset.Close()
 				} else {
 					// Try to open and read Metadata of L2A Dataset
@@ -257,14 +241,59 @@ func getMetaData(datasets []os.FileInfo, page int, metadata chan []string) (meta
 						"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml",
 						gdal.ReadOnly)
 					if err == nil {
-						metadata <- dataset.Metadata("")
+						L2A = true
+						createJSON(dataset.Metadata(""), &metadataL2A)
 						dataset.Close()
 					} else {
-						return metadatacounter, 0, err
+						return nil, nil, 0, err
 					}
+				}
+				if L2A {
+					datalocation := "/opt/sentinel2/" + datasets[index].Name() + "/GRANULE/"
+					datasetname, err := ioutil.ReadDir(datalocation)
+					if err != nil {
+						return nil, nil, 0, err
+					}
+					datasetsR10M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R10m/")
+					datasetsR20M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R20m/")
+					datasetsR60M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R60m/")
+
+					var datasetsR10Mstring string
+					for i := range datasetsR10M {
+						datasetsR10Mstring += datasetsR10M[i].Name() + "\",\""
+					}
+					var datasetsR20Mstring string
+					for i := range datasetsR20M {
+						datasetsR20Mstring += datasetsR20M[i].Name() + "\",\""
+					}
+					var datasetsR60Mstring string
+					for i := range datasetsR60M {
+						datasetsR60Mstring += datasetsR60M[i].Name() + "\",\""
+					}
+
+					metadataL2A = metadataL2A[:len(metadataL2A)-2]
+					metadataL2A = append(metadataL2A, []byte(",\"R10M\":[\""+datasetsR10Mstring[:len(datasetsR10Mstring)-2]+"]")...)
+					metadataL2A = append(metadataL2A, []byte(",\"R20M\":[\""+datasetsR20Mstring[:len(datasetsR20Mstring)-2]+"]")...)
+					metadataL2A = append(metadataL2A, []byte(",\"R60M\":[\""+datasetsR60Mstring[:len(datasetsR60Mstring)-2]+"]}")...)
 				}
 			}
 		}
 	}
-	return metadatacounter, totalcounter, nil
+	return metadataL1C, metadataL2A, totalcounter, nil
+}
+
+func createJSON(input []string, output *[]byte) error {
+	// Convert into JSON
+	fields := make(map[string]string)
+	for index := range input {
+		keyValuePair := strings.Split(input[index], "=")
+		fields[keyValuePair[0]] = keyValuePair[1]
+	}
+	jsonstring, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	jsonstring = append(jsonstring, []byte(",")...)
+	*output = append(*output, jsonstring...)
+	return nil
 }

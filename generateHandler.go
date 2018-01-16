@@ -6,6 +6,7 @@ import (
 	"github.com/ling-js/go-gdal"
 	"github.com/pkg/errors"
 	"github.com/segmentio/ksuid"
+	"io/ioutil"
 	"math"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ func Timetrack(start time.Time, name string) {
 
 type options struct {
 	Rgbbool bool    `schema:"rgbbool"`
+	S2A     bool    `schema:"s2a"`
 	id      string  `schema:"-"`
 	Gscdn   string  `schema:"gscdn"`
 	Rcdn    string  `schema:"rcdn"`
@@ -31,6 +33,10 @@ type options struct {
 	Rcn     string  `schema:"rcn"`
 	Gcn     string  `schema:"gcn"`
 	Bcn     string  `schema:"bcn"`
+	Greyr   string  `schema:"greyr"`
+	Rcr     string  `schema:"rcr"`
+	Gcr     string  `schema:"gcr"`
+	Bcr     string  `schema:"bcr"`
 	Greymin float64 `schema:"greymin"`
 	Rcmin   float64 `schema:"rcmin"`
 	Gcmin   float64 `schema:"gcmin"`
@@ -76,13 +82,41 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Get Name of original Dataset for later georeferencing
+	var originalDataset string
 
+	// Get Name of original Dataset
+	if options.S2A {
+		// Get Name of dynamically named subfolder
+		datalocation := "/opt/sentinel2/" + options.Rcdn + "/GRANULE/"
+		subfolder, err := ioutil.ReadDir(datalocation)
+		if err != nil {
+			w.WriteHeader(400)
+			w.Write([]byte("Unable to find dataset: " + err.Error()))
+
+			if Verbose {
+				fmt.Println("Error finding the Dataset")
+				fmt.Println(err.Error())
+			}
+		}
+
+		// Get Resolution
+		resolution := options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
+
+		//Open Dataset via GDAL
+		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + options.Rcn
+	} else {
+		originalDataset = options.Rcdn
+	}
 	if options.Rgbbool {
-		//TODO(specki): refactor into goroutines or refactor to pointers instead of channels
-		ch := make(chan []uint16, 3)
+		var r, g, b []uint16
+
 		// Read source data
-		err = ReadDataFromDataset(options.Rcn, options.Rcdn, ch, w)
-		r := <-ch
+		if options.S2A {
+			r, err = ReadDataFromDatasetL1C(options.Rcn, options.Rcdn, w)
+		} else {
+			r, err = ReadDataFromDatasetL2A(options.Rcn, options.Rcdn, w)
+		}
 		if err != nil {
 			if Verbose {
 				fmt.Println("Error reading red dataset")
@@ -90,8 +124,11 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		err = ReadDataFromDataset(options.Gcn, options.Gcdn, ch, w)
-		g := <-ch
+		if options.S2A {
+			g, err = ReadDataFromDatasetL1C(options.Gcn, options.Gcdn, w)
+		} else {
+			g, err = ReadDataFromDatasetL2A(options.Gcn, options.Gcdn, w)
+		}
 		if err != nil {
 			if Verbose {
 				fmt.Println("Error reading green dataset")
@@ -99,8 +136,11 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		err = ReadDataFromDataset(options.Bcn, options.Bcdn, ch, w)
-		b := <-ch
+		if options.S2A {
+			b, err = ReadDataFromDatasetL1C(options.Bcn, options.Bcdn, w)
+		} else {
+			b, err = ReadDataFromDatasetL2A(options.Bcn, options.Bcdn, w)
+		}
 		if err != nil {
 			if Verbose {
 				fmt.Println("Error reading blue dataset")
@@ -110,7 +150,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = writeGeoTIFF_RGB(
-			options.Gcdn, // copy georeference
+			originalDataset, // copy georeference
 			options.id+".tif",
 			r,
 			g,
@@ -131,10 +171,13 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		ch := make(chan []uint16, 1)
 		// Read source data
-		err = ReadDataFromDataset(options.Gsc, options.Gscdn, ch, w)
-		g := <-ch
+		var g []uint16
+		if options.S2A {
+			g, err = ReadDataFromDatasetL1C(options.Gsc, options.Gscdn, w)
+		} else {
+			g, err = ReadDataFromDatasetL2A(options.Gsc, options.Gscdn, w)
+		}
 		if err != nil {
 			if Verbose {
 				fmt.Println("Error reading grey dataset")
@@ -143,7 +186,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err = writeGeoTIFF_GREY(
-			options.Gscdn,
+			originalDataset,
 			options.id+".tif",
 			g,
 			options.Greymin,
@@ -179,7 +222,65 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(options.id))
 }
 
-func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.ResponseWriter) error {
+func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter) ([]uint16, error) {
+	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
+
+	// Get Name of dynamically named subfolder
+	datalocation := "/opt/sentinel2/" + filename + "/GRANULE/"
+	subfolder, err := ioutil.ReadDir(datalocation)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get Resolution
+	resolution := datasetname[len(datasetname)-7 : len(datasetname)-5]
+
+	//Open Dataset via GDAL
+	dataset, err := gdal.Open("/opt/sentinel2/"+filename+"/GRANULE/"+subfolder[0].Name()+"/IMG_DATA/R"+resolution+"m/"+datasetname, gdal.ReadOnly)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Error opening Dataset: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error opening Dataset by GDAL")
+			fmt.Println(err.Error())
+		}
+	}
+	defer dataset.Close()
+
+	// get dimensions
+	rasterSize := dataset.RasterXSize()
+	// create Data buffer
+	b := make([]uint16, rasterSize*rasterSize)
+
+	err = dataset.IO(
+		gdal.Read,
+		0,
+		0,
+		rasterSize,
+		rasterSize,
+		b,
+		rasterSize,
+		rasterSize,
+		1,
+		[]int{1},
+		0,
+		0,
+		0)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Error reading data from Dataset: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error reading data from dataset")
+			fmt.Println(err.Error())
+		}
+		return nil, err
+	}
+	fmt.Println(b)
+	// return filled buffer
+	return b, nil
+}
+
+func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([]uint16, error) {
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 	// Open Dataset via GDAL
 	dataset, err := gdal.Open(filename, gdal.ReadOnly)
@@ -190,8 +291,7 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 			fmt.Println("Error opening Dataset by GDAL")
 			fmt.Println(err.Error())
 		}
-		ch <- make([]uint16, 0)
-		return err
+		return nil, err
 	}
 
 	// map bandname to appropiate bandnumber
@@ -206,8 +306,7 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 				fmt.Println("Error reading rasterband from dataset")
 				fmt.Println(err.Error())
 			}
-			ch <- make([]uint16, 0)
-			return err
+			return nil, err
 		}
 		bandstring := strings.Split(layer.Metadata("")[0], "=")
 		if bandstring[1] == bandname {
@@ -221,8 +320,7 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 		if Verbose {
 			fmt.Println("Invalid Bandname supplied. Band '" + bandname + "' does not exist in Dataset " + filename)
 		}
-		ch <- make([]uint16, 0)
-		return errors.New("dummy")
+		return nil, errors.New("dummy")
 	}
 
 	// defer closing until function exit
@@ -254,13 +352,10 @@ func ReadDataFromDataset(bandname, filename string, ch chan []uint16, w http.Res
 			fmt.Println("Error reading data from dataset")
 			fmt.Println(err.Error())
 		}
-		ch <- make([]uint16, 0)
-		return err
+		return nil, err
 	}
-
-	// return filled buffer via channel
-	ch <- b
-	return nil
+	// return filled buffer
+	return b, err
 }
 
 func writeGeoTIFF_GREY(
@@ -273,6 +368,7 @@ func writeGeoTIFF_GREY(
 		return err
 	}
 
+	// Map original Values to 0-255 space
 	var data8bit = make([]byte, len(grey))
 	transformColorValues(data8bit, grey, maxgrey, mingrey, len(grey))
 
@@ -297,7 +393,8 @@ func writeGeoTIFF_GREY(
 
 // creates new GeoTIFF with same georeference as inputdataset.
 func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dataset, int, error) {
-	// Open original file to copy Georeference
+
+	// Open original file to get Georeference
 	original, err := gdal.Open(inputdataset, gdal.ReadOnly)
 	if err != nil {
 		return nil, 0, err
@@ -319,6 +416,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 		gdal.Byte,
 		[]string{"INTERLEAVE=BAND"})
 
+	// Copy Georeference to new dataset
 	newdataset.SetGeoTransform(original.GeoTransform())
 	newdataset.SetProjection(original.ProjectionRef())
 
@@ -327,6 +425,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 
 // transformColorValues transforms given 16-bit values into 8-bit values.
 // Linear transform unless original values are outside given bounds, then 0
+//
 func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue float64, newsize int) {
 	delta := sliceDelta(data)
 	originalrowsize := int(math.Sqrt(float64(len(data))))
