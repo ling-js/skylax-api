@@ -15,12 +15,6 @@ import (
 	"time"
 )
 
-// Tracks the time elapsed since start.
-func Timetrack(start time.Time, name string) {
-	elapsed := time.Since(start)
-	fmt.Printf("%s finished in %s\n", name, elapsed)
-}
-
 type options struct {
 	Rgbbool bool    `schema:"rgbbool"`
 	S2A     bool    `schema:"s2a"`
@@ -103,7 +97,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		// Get Resolution
 		resolution := options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
 
-		//Open Dataset via GDAL
+		// Open Dataset via GDAL
 		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + options.Rcn
 	} else {
 		originalDataset = options.Rcdn
@@ -425,7 +419,6 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 
 // transformColorValues transforms given 16-bit values into 8-bit values.
 // Linear transform unless original values are outside given bounds, then 0
-//
 func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue float64, newsize int) {
 	delta := sliceDelta(data)
 	originalrowsize := int(math.Sqrt(float64(len(data))))
@@ -492,6 +485,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	}
 }
 
+// writeGeoTIFF_RGB creates a new GeoTIFF File
 func writeGeoTIFF_RGB(
 	inputdataset, outputdataset string,
 	red, green, blue []uint16,
@@ -546,7 +540,6 @@ func writeGeoTIFF_RGB(
 }
 
 // sliceDelta return the difference between largest and smallest number in slice
-//TODO(specki): Maybe refactor to use ComputeMinMax() of GDAL Rasterband
 func sliceDelta(slice []uint16) (delta float64) {
 	var min, max uint16
 	for _, element := range slice {
