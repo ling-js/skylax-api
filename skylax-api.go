@@ -31,7 +31,6 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", c.Handler(handler)))
 }
 
-
 // Tracks the time elapsed since start.
 func Timetrack(start time.Time, name string) {
 	elapsed := time.Since(start)

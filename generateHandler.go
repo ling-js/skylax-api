@@ -207,7 +207,6 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Tiling via gdal2tiles
 	cmd := exec.Command("./DEV_gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
-	fmt.Println(cmd)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -541,6 +540,7 @@ func writeGeoTIFF_RGB(
 
 // sliceDelta return the difference between largest and smallest number in slice
 func sliceDelta(slice []uint16) (delta float64) {
+	defer Timetrack(time.Now(), "MinMaxComputation")
 	var min, max uint16
 	for _, element := range slice {
 		if element < min {
