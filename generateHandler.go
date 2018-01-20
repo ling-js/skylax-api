@@ -1,10 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/gorilla/schema"
 	"github.com/ling-js/go-gdal"
-	"github.com/pkg/errors"
 	"github.com/segmentio/ksuid"
 	"io/ioutil"
 	"math"
@@ -206,7 +206,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./DEV_gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
+	cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Run()
