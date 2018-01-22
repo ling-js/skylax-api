@@ -110,7 +110,7 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	// Create metadata
 	metadatajson = append(metadatajson, mtdL1C[:len(mtdL1C)-1]...)
 	metadatajson = append(metadatajson, []byte("],")...)
-	metadatajson = append(metadatajson, mtdL2A...)
+	metadatajson = append(metadatajson, mtdL2A[:len(mtdL2A)-1]...)
 	metadatajson = append(metadatajson, []byte("]}")...)
 
 	// Write Response with default 200 OK Status Code
@@ -147,9 +147,15 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		}
 	}
 	for index := range datasets {
+		// Only deal with existent datasets
+		if datasets[index] == nil {
+			return nil
+		}
+
 		var generationTimeRAW, footprintRAW string
 		var dataset *gdal.Dataset
 		var err error
+
 		// Try to get L1C Metadata
 		dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
 		if err == nil {
@@ -208,8 +214,8 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 // Gets the metaData for 8 items starting with element page*8.
 func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []byte, totalcounter int, error error) {
 	// Start assembling Metadata
-	metadataL1C = []byte("{\"L1C\":[")
-	metadataL2A = []byte("\"L2A\":[")
+	metadataL1C = []byte("{\"L1C\":[ ")
+	metadataL2A = []byte("\"L2A\":[ ")
 	// If L2A Dataset add additional Metadata
 	var L2A bool
 	// Total counts of elements found in datasets
@@ -249,14 +255,17 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 					}
 				}
 				if L2A {
+					// Get datast location (with dynamic folder name)
 					datalocation := "/opt/sentinel2/" + datasets[index].Name() + "/GRANULE/"
 					datasetname, err := ioutil.ReadDir(datalocation)
 					if err != nil {
 						return nil, nil, 0, err
 					}
-					datasetsR10M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R10m/")
-					datasetsR20M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R20m/")
-					datasetsR60M, err := ioutil.ReadDir(datalocation + datasetname[0].Name() + "/IMG_DATA/R60m/")
+					//
+					location := datalocation + datasetname[0].Name()
+					datasetsR10M, err := ioutil.ReadDir(location + "/IMG_DATA/R10m/")
+					datasetsR20M, err := ioutil.ReadDir(location + "/IMG_DATA/R20m/")
+					datasetsR60M, err := ioutil.ReadDir(location + "/IMG_DATA/R60m/")
 
 					var datasetsR10Mstring string
 					for i := range datasetsR10M {
@@ -274,14 +283,14 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 					metadataL2A = metadataL2A[:len(metadataL2A)-2]
 					metadataL2A = append(metadataL2A, []byte(",\"R10M\":[\""+datasetsR10Mstring[:len(datasetsR10Mstring)-2]+"]")...)
 					metadataL2A = append(metadataL2A, []byte(",\"R20M\":[\""+datasetsR20Mstring[:len(datasetsR20Mstring)-2]+"]")...)
-					metadataL2A = append(metadataL2A, []byte(",\"R60M\":[\""+datasetsR60Mstring[:len(datasetsR60Mstring)-2]+"]}")...)
+					metadataL2A = append(metadataL2A, []byte(",\"R60M\":[\""+datasetsR60Mstring[:len(datasetsR60Mstring)-2]+"]},")...)
 				}
 			}
 		}
 	}
 	return metadataL1C, metadataL2A, totalcounter, nil
 }
-
+// Creates a JSON Object as byte slice from gdalinfo output
 func createJSON(input []string, output *[]byte) error {
 	// Convert into JSON
 	fields := make(map[string]string)

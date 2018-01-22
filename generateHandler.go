@@ -17,7 +17,7 @@ import (
 
 type options struct {
 	Rgbbool bool    `schema:"rgbbool"`
-	S2A     bool    `schema:"s2a"`
+	S2A     bool    `schema:"l2a"`
 	id      string  `schema:"-"`
 	Gscdn   string  `schema:"gscdn"`
 	Rcdn    string  `schema:"rcdn"`
@@ -27,10 +27,6 @@ type options struct {
 	Rcn     string  `schema:"rcn"`
 	Gcn     string  `schema:"gcn"`
 	Bcn     string  `schema:"bcn"`
-	Greyr   string  `schema:"greyr"`
-	Rcr     string  `schema:"rcr"`
-	Gcr     string  `schema:"gcr"`
-	Bcr     string  `schema:"bcr"`
 	Greymin float64 `schema:"greymin"`
 	Rcmin   float64 `schema:"rcmin"`
 	Gcmin   float64 `schema:"gcmin"`
@@ -42,22 +38,26 @@ type options struct {
 }
 
 func parseOptions(r *http.Request) (options options, err error) {
+	// Parse POST-Body
 	err = r.ParseForm()
-
 	if err != nil {
 		return options, err
 	}
+
+	// Parse POST-Body to options struct
 	decoder := schema.NewDecoder()
 	err = decoder.Decode(&options, r.PostForm)
 	if err != nil {
 		return options, err
 	}
+
+	// Create unique random id for temporary TMS
 	var ksu, err2 = ksuid.NewRandom()
 	if err2 != nil {
 		return options, err
 	}
-
 	options.id = ksu.String()
+
 	return options, nil
 }
 
@@ -97,16 +97,27 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		// Get Resolution
 		resolution := options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
 
-		// Open Dataset via GDAL
-		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + options.Rcn
+		// get name of Dataset to copy georeference
+		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
+		if options.Rgbbool {
+			originalDataset += options.Rcn
+		} else {
+			originalDataset += options.Gsc
+		}
 	} else {
-		originalDataset = options.Rcdn
+		if options.Rgbbool {
+			originalDataset = options.Rcdn
+		} else {
+			originalDataset = options.Gscdn
+		}
 	}
+
+	// Read Data from source datasets
 	if options.Rgbbool {
 		var r, g, b []uint16
 
-		// Read source data
-		if options.S2A {
+		// Read red dataset
+		if !options.S2A {
 			r, err = ReadDataFromDatasetL1C(options.Rcn, options.Rcdn, w)
 		} else {
 			r, err = ReadDataFromDatasetL2A(options.Rcn, options.Rcdn, w)
@@ -118,7 +129,8 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if options.S2A {
+		// Read green dataset
+		if !options.S2A {
 			g, err = ReadDataFromDatasetL1C(options.Gcn, options.Gcdn, w)
 		} else {
 			g, err = ReadDataFromDatasetL2A(options.Gcn, options.Gcdn, w)
@@ -130,7 +142,8 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		if options.S2A {
+		// Read blue dataset
+		if !options.S2A {
 			b, err = ReadDataFromDatasetL1C(options.Bcn, options.Bcdn, w)
 		} else {
 			b, err = ReadDataFromDatasetL2A(options.Bcn, options.Bcdn, w)
@@ -143,6 +156,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Write all data to temporary tif file
 		err = writeGeoTIFF_RGB(
 			originalDataset, // copy georeference
 			options.id+".tif",
@@ -167,7 +181,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Read source data
 		var g []uint16
-		if options.S2A {
+		if !options.S2A {
 			g, err = ReadDataFromDatasetL1C(options.Gsc, options.Gscdn, w)
 		} else {
 			g, err = ReadDataFromDatasetL2A(options.Gsc, options.Gscdn, w)
@@ -179,13 +193,14 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+
+		// Write Data to .tif
 		err = writeGeoTIFF_GREY(
 			originalDataset,
 			options.id+".tif",
 			g,
 			options.Greymin,
 			options.Greymax)
-
 		if err != nil {
 			w.WriteHeader(500)
 			w.Write([]byte("Unable to generate Greyscale image: " + err.Error()))
@@ -197,7 +212,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// calculate correct NODATA values
+	// choose correct NODATA values
 	var nodata string
 	if options.Rgbbool {
 		nodata = "0,0,0"
@@ -207,8 +222,6 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Tiling via gdal2tiles
 	cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
 	cmd.Run()
 
 	// 200 Response with generated ID
@@ -245,6 +258,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 	// create Data buffer
 	b := make([]uint16, rasterSize*rasterSize)
 
+	// Read data from dataset
 	err = dataset.IO(
 		gdal.Read,
 		0,
@@ -268,8 +282,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 		}
 		return nil, err
 	}
-	fmt.Println(b)
-	// return filled buffer
+	// return filled data slice
 	return b, nil
 }
 
@@ -315,9 +328,8 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 		}
 		return nil, errors.New("dummy")
 	}
-
-	// defer closing until function exit
 	defer dataset.Close()
+
 	// get dimensions
 	rasterSize := dataset.RasterXSize()
 	// create Data buffer
@@ -360,11 +372,13 @@ func writeGeoTIFF_GREY(
 	if err != nil {
 		return err
 	}
+	defer newdataset.Close()
 
 	// Map original Values to 0-255 space
 	var data8bit = make([]byte, len(grey))
 	transformColorValues(data8bit, grey, maxgrey, mingrey, len(grey))
 
+	// Write to File
 	newdataset.IO(
 		gdal.Write,
 		0,
@@ -380,7 +394,6 @@ func writeGeoTIFF_GREY(
 		0,
 		0,
 	)
-	newdataset.Close()
 	return nil
 }
 
@@ -394,6 +407,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 	}
 	defer original.Close()
 
+	// Copy original size to new Dataset
 	rastersize := original.RasterXSize()
 
 	driver, err := gdal.GetDriverByName("GTiff")
@@ -401,6 +415,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 		return nil, 0, err
 	}
 
+	// Create new file and write Dataset
 	newdataset := driver.Create(
 		outputdataset,
 		rastersize,
@@ -423,9 +438,11 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	originalrowsize := int(math.Sqrt(float64(len(data))))
 	newrowsize := int(math.Sqrt(float64(newsize)))
 
+	// Get scaling Factor
 	var runnerdelta int
 	switch factor := (newrowsize - originalrowsize) / 1830; factor {
 	case 0:
+		// Shortcut to skip scaling
 		runnerdelta = -999
 	case 2:
 		runnerdelta = 3
@@ -435,7 +452,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 		runnerdelta = 6
 	}
 
-	// Optimize if newscale is same as oldscale
+	// Skip scaling if newscale is same as oldscale
 	if runnerdelta != -999 {
 		runner := 0
 		runnerY := runnerdelta
@@ -472,6 +489,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 			output[i] = (byte)((c / delta) * 255)
 		}
 	} else {
+		// Fast transform
 		for i := 0; i < newsize; i++ {
 			c := float64(data[i])
 			// check if value is within bounds
@@ -484,7 +502,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	}
 }
 
-// writeGeoTIFF_RGB creates a new GeoTIFF File
+// writeGeoTIFF_RGB creates a new GeoTIFF File and writes provided r g b values to it
 func writeGeoTIFF_RGB(
 	inputdataset, outputdataset string,
 	red, green, blue []uint16,
@@ -492,13 +510,11 @@ func writeGeoTIFF_RGB(
 ) error {
 	defer Timetrack(time.Now(), "WriteGeoTIFF: ")
 
+	// Create base File
 	newdataset, rastersize, err := createGeoTIFF(inputdataset, outputdataset, 3)
 	if err != nil {
 		return err
 	}
-
-	// 8bit data
-	var data8bit = make([]byte, 361681200)
 
 	// get size of dataset with highest resolution
 	maxresolution := 0
@@ -513,12 +529,17 @@ func writeGeoTIFF_RGB(
 	} else {
 		maxresolution = lenblue
 	}
+	maxsquared := maxresolution*maxresolution
 
-	// for red channel
-	transformColorValues(data8bit[:120560400], red, maxred, minred, maxresolution)
-	transformColorValues(data8bit[120560400:241120800], green, maxgreen, mingreen, maxresolution)
-	transformColorValues(data8bit[241120800:], blue, maxblue, minblue, maxresolution)
+	// temporary container for output data
+	var data8bit = make([]byte, maxsquared*3)
 
+	// Transform all Color values to 0-255 space
+	transformColorValues(data8bit[:maxsquared], red, maxred, minred, maxresolution)
+	transformColorValues(data8bit[maxsquared:2*maxsquared], green, maxgreen, mingreen, maxresolution)
+	transformColorValues(data8bit[maxsquared:], blue, maxblue, minblue, maxresolution)
+
+	// Write Data to file
 	newdataset.IO(
 		gdal.Write,
 		0,

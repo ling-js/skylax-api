@@ -21,7 +21,6 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "ValueLookup")
 	// Get Query Parameters
 	q := r.URL.Query()
-
 	xcoord := q.Get("x")
 	ycoord := q.Get("y")
 	datasetname := q.Get("d")
@@ -49,7 +48,7 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		output, err = exec.Command("gdallocationinfo", "-xml", "-wgs84", datasetname, xcoord, ycoord).Output()
 	}
-
+	// Check for error while executing gdallocationinfo
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Error executing Value Lookup. Error was: " + err.Error()))
