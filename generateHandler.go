@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"math"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -81,8 +80,20 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get Name of original Dataset
 	if options.S2A {
+		var resolution string
+		var datasetname string
+
+		// Get Resolution + Set base Dataset
+		if options.Rgbbool {
+			resolution = options.Rcn[len(options.Rcn)-7: len(options.Rcn)-5]
+			datasetname = options.Rcdn
+		} else {
+			resolution = options.Gsc[len(options.Gsc)-7: len(options.Gsc)-5]
+			datasetname = options.Gscdn
+		}
+
 		// Get Name of dynamically named subfolder
-		datalocation := "/opt/sentinel2/" + options.Rcdn + "/GRANULE/"
+		datalocation := "/opt/sentinel2/" + datasetname + "/GRANULE/"
 		subfolder, err := ioutil.ReadDir(datalocation)
 		if err != nil {
 			w.WriteHeader(400)
@@ -94,11 +105,8 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Get Resolution
-		resolution := options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
-
 		// get name of Dataset to copy georeference
-		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
+		originalDataset = "/opt/sentinel2/" + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
 		if options.Rgbbool {
 			originalDataset += options.Rcn
 		} else {
@@ -529,15 +537,14 @@ func writeGeoTIFF_RGB(
 	} else {
 		maxresolution = lenblue
 	}
-	maxsquared := maxresolution*maxresolution
 
 	// temporary container for output data
-	var data8bit = make([]byte, maxsquared*3)
+	var data8bit = make([]byte, maxresolution*3)
 
 	// Transform all Color values to 0-255 space
-	transformColorValues(data8bit[:maxsquared], red, maxred, minred, maxresolution)
-	transformColorValues(data8bit[maxsquared:2*maxsquared], green, maxgreen, mingreen, maxresolution)
-	transformColorValues(data8bit[maxsquared:], blue, maxblue, minblue, maxresolution)
+	transformColorValues(data8bit[:maxresolution], red, maxred, minred, maxresolution)
+	transformColorValues(data8bit[maxresolution:2*maxresolution], green, maxgreen, mingreen, maxresolution)
+	transformColorValues(data8bit[2*maxresolution:], blue, maxblue, minblue, maxresolution)
 
 	// Write Data to file
 	newdataset.IO(

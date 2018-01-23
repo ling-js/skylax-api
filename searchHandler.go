@@ -9,28 +9,41 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// custom Interface to sort by Date
+type Sentinel2Dataset []os.FileInfo
+func (nf Sentinel2Dataset) Len() int {return len(nf)}
+func (nf Sentinel2Dataset) Swap(i,j int) {nf[i], nf[j] = nf[j], nf[i] }
+func (nf Sentinel2Dataset) Less(i, j int) bool {
+	// Compare names from 12th letter onwards lexicographically
+	return nf[i].Name()[11:] < nf[j].Name()[11:]
+}
+
+// Searchhandler returns all Datasets not matching one of the filter criteria.
 func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()
+	// Get all Datasets from Directory
 	datasets, err := ioutil.ReadDir("/opt/sentinel2")
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Unable to open Data Repository: " + err.Error()))
 		return
 	}
+	// Sort by Date
+	sort.Sort(Sentinel2Dataset(datasets))
 
 	bboxstring := q.Get("bbox")
 	var bbox *geos.Geometry
 
-	// Check if bbox is supplied
+	// Parse supplied coordinates into bbox
 	if bboxstring != "" {
 		coordinates := strings.Split(bboxstring, ",")
-
 		polygon :=
 			"POLYGON((" +
 				coordinates[0] + " " +
@@ -54,14 +67,16 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Filter by Name
+
+	// Get Filter Filter by Name
 	err = nameFilter(datasets, q.Get("substring"))
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Unable to filter by substring: " + err.Error()))
 		return
 	}
-	// Filter by bbox, startDate, endDate
+
+	// Setup filter by bbox, startDate, endDate
 	startDate := q.Get("startdate")
 	endDate := q.Get("enddate")
 	filterDates := startDate != "" && endDate != ""
