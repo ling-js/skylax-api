@@ -1,4 +1,34 @@
-# skylax-api
+# Skylax-Suite
+
+## Installation
+
+The preferred way for a complete suite installation
+
+nginx proxy:
+
+    1. sudo apt-get install nginx
+
+node:
+
+    1. https://nodejs.org/en/download/package-manager/
+    2. sudo apt-get install npm
+    3. npm install pm2 -g // cluster management
+
+### Starting
+    1. pm2 start app.js -i 4
+
+## skylax-client
+### Installation
+
+    1. git clone https://github.com/ling-js/skylax.git
+    2. cd skylax
+    3. npm install
+    4. npm start
+
+###
+
+
+## skylax-api
 ### Requirements
 The skylax-api depends on the following libraries to be installed in the host operating system. Please refer to the their Websites for installation instructions:
  * [GEOS](http://trac.osgeo.org/geos/) released under [LGPL](https://git.osgeo.org/gitea/geos/geos/src/branch/master/COPYING)
@@ -7,6 +37,7 @@ The skylax-api depends on the following libraries to be installed in the host op
 ### Installation
 Run following commands in the desired install directory
 
+    TODO(specki): gorelease
     1. go get github.com/ling-js/skylax-api
     2. go build
 

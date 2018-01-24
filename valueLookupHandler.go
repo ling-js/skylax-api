@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os/exec"
 	"time"
 )
 
+// Response Schemata of gdallocation script
 type Report struct {
 	Bands []Bandreport `xml:"BandReport"`
 }
@@ -17,6 +19,7 @@ type Bandreport struct {
 	Value string `xml:"Value"`
 }
 
+// LookupHandler handles all Requests for concrete Dataset values
 func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "ValueLookup")
 	// Get Query Parameters
@@ -41,10 +44,15 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get Resolution
-		resolution := datasetname[len(datasetname)-7 : len(datasetname)-5]
+		resolution := bandname[len(bandname)-7 : len(bandname)-5]
+
 		// Get Pixel Data
 		datasetlocation := "/opt/sentinel2/" + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + bandname
+
 		output, err = exec.Command("gdallocationinfo", "-xml", "-wgs84", datasetlocation, xcoord, ycoord).Output()
+		if err != nil {
+			fmt.Println(err.Error())
+		}
 	} else {
 		output, err = exec.Command("gdallocationinfo", "-xml", "-wgs84", datasetname, xcoord, ycoord).Output()
 	}
@@ -66,6 +74,7 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	if datasetname[:8] == "SENTINEL" {
 		// Get and Return Value corresponding to provided bandname
 		for index := range v.Bands {
+			fmt.Println("")
 			// Extract Bandname from Filename
 			band := v.Bands[index].File
 			band = band[len(band)-7 : len(band)-4]
@@ -75,11 +84,13 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		w.Write([]byte(v.Bands[0].Value))
-		return
+		if v.Bands != nil {
+			w.Write([]byte(v.Bands[0].Value))
+			return
+		}
 	}
 
 	// If Band is not found in Dataset
 	w.WriteHeader(404)
-	w.Write([]byte("Cannot find Band in Dataset"))
+	w.Write(append([]byte("Error while finding Band in Dataset \n Debug output below: \n \n "), output...))
 }

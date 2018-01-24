@@ -17,8 +17,9 @@ import (
 
 // custom Interface to sort by Date
 type Sentinel2Dataset []os.FileInfo
-func (nf Sentinel2Dataset) Len() int {return len(nf)}
-func (nf Sentinel2Dataset) Swap(i,j int) {nf[i], nf[j] = nf[j], nf[i] }
+
+func (nf Sentinel2Dataset) Len() int      { return len(nf) }
+func (nf Sentinel2Dataset) Swap(i, j int) { nf[i], nf[j] = nf[j], nf[i] }
 func (nf Sentinel2Dataset) Less(i, j int) bool {
 	// Compare names from 12th letter onwards lexicographically
 	return nf[i].Name()[11:] < nf[j].Name()[11:]
@@ -305,6 +306,7 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 	}
 	return metadataL1C, metadataL2A, totalcounter, nil
 }
+
 // Creates a JSON Object as byte slice from gdalinfo output
 func createJSON(input []string, output *[]byte) error {
 	// Convert into JSON

@@ -19,7 +19,7 @@ func main() {
 	verbose := flag.Bool("v", false, "toggle verbose output")
 	flag.Parse()
 	if *verbose {
-			Verbose = true
+		Verbose = true
 	}
 
 	// Create Routes
