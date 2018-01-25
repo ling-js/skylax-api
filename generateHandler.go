@@ -257,9 +257,16 @@ func HandleTCI(originalDataset string, options options, w http.ResponseWriter) e
 		// Get jp2 Location
 		originalDataset = dataset.FileList()[2]
 	}
+
+	if Verbose {
+		fmt.Println("Running Tiling Script...")
+	}
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
+	cmd := exec.Command("./gdal2tiles.py", "--resume","-v", "-z", "9-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
 	cmd.Run()
+	if Verbose {
+		fmt.Println("... Tiling Script finished.")
+	}
 	return nil
 }
 
@@ -337,7 +344,7 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 		return nil, err
 	}
 
-	// map bandname to appropiate bandnumber
+	// map bandname to appropriate bandnumber
 	rasterbands := dataset.RasterCount()
 	var bandnumber int
 	for i := 1; i <= rasterbands; i++ {

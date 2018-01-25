@@ -148,7 +148,7 @@ func nameFilter(datasets []os.FileInfo, name string) error {
 	return nil
 }
 
-// metaDataFilter sets all Elements in datasets to nil when generationTime is not withing bounds set by startDate and endDate or does not intersect bbox.
+// metaDataFilter sets all Elements in datasets to nil when generationTime is not within bounds set by startDate and endDate or does not intersect bbox.
 func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbox *geos.Geometry, filterDates, filterBox bool) error {
 	var startDate, endDate time.Time
 	if filterDates {

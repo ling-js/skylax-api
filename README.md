@@ -1,6 +1,6 @@
 # Skylax-Suite
 
-## Installation
+[![Go Report Card](https://goreportcard.com/badge/github.com/ling-js/skylax-api)](https://goreportcard.com/report/github.com/ling-js/skylax-api)## Installation
 
 The preferred way for a complete suite installation
 
