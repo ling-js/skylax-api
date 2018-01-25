@@ -10,11 +10,11 @@ import (
 )
 
 // Response Schemata of gdallocation script
-type Report struct {
-	Bands []Bandreport `xml:"BandReport"`
+type report struct {
+	Bands []bandreport `xml:"BandReport"`
 }
 
-type Bandreport struct {
+type bandreport struct {
 	File  string `xml:"LocationInfo>File"`
 	Value string `xml:"Value"`
 }
@@ -63,7 +63,7 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse Output from xml to Go struct
-	var v Report
+	var v report
 	err = xml.Unmarshal(output, &v)
 	if err != nil {
 		w.WriteHeader(500)

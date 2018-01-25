@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// custom Interface to sort by Date
+// Sentinel2Dataset provieds custom Interface to os.FileInfo to sort by Date
 type Sentinel2Dataset []os.FileInfo
 
 func (nf Sentinel2Dataset) Len() int      { return len(nf) }
@@ -25,7 +25,7 @@ func (nf Sentinel2Dataset) Less(i, j int) bool {
 	return nf[i].Name()[11:] < nf[j].Name()[11:]
 }
 
-// Searchhandler returns all Datasets not matching one of the filter criteria.
+// SearchHandler returns all Datasets not matching one of the filter criteria.
 func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Init global Variables
+// Verbose command line Parameter
 var Verbose = false
 
 func main() {
@@ -42,7 +42,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", c.Handler(handler)))
 }
 
-// Tracks the time elapsed since start.
+// Timetrack racks the time elapsed since start. and logs it to console output
 func Timetrack(start time.Time, name string) {
 	elapsed := time.Since(start)
 	fmt.Printf("%s finished in %s\n", name, elapsed)

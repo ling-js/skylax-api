@@ -129,7 +129,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(options.id))
 }
 
-// Handles creation of RGB Images from user-supplied Input Datasets
+// HandleRGB handles creation of RGB Images from user-supplied Input Datasets
 func HandleRGB(originalDataset string, options options, w http.ResponseWriter) error {
 	var r, g, b []uint16
 	var err error
@@ -177,7 +177,7 @@ func HandleRGB(originalDataset string, options options, w http.ResponseWriter) e
 	}
 
 	// Write all data to temporary tif file
-	err = writeGeoTIFF_RGB(
+	err = writeGeoTiffRGB(
 		originalDataset, // copy georeference
 		options.id+".tif",
 		r,
@@ -201,7 +201,7 @@ func HandleRGB(originalDataset string, options options, w http.ResponseWriter) e
 	return nil
 }
 
-// Handles creation of Greyscale Images from user-supplied Input Dataset
+// HandleGSC handles creation of Greyscale Images from user-supplied Input Dataset
 func HandleGSC(originalDataset string, options options, w http.ResponseWriter) error {
 	// Read source data
 	var g []uint16
@@ -221,7 +221,7 @@ func HandleGSC(originalDataset string, options options, w http.ResponseWriter) e
 	}
 
 	// Write Data to .tif
-	err = writeGeoTIFF_GREY(
+	err = writeGeoTiffGrey(
 		originalDataset,
 		options.id+".tif",
 		g,
@@ -239,7 +239,7 @@ func HandleGSC(originalDataset string, options options, w http.ResponseWriter) e
 	return nil
 }
 
-// Handles Request for True Color Images
+// HandleTCI handles Request for True Color Images
 func HandleTCI(originalDataset string, options options, w http.ResponseWriter) error {
 
 	// Get jp2 location from L1C Dataset
@@ -322,7 +322,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 	return b, nil
 }
 
-// ReadDataFromDatasetL2A reads a Sentinel Level 1C Dataset into uint16 slice
+// ReadDataFromDatasetL1C reads a Sentinel Level 1C Dataset into uint16 slice
 func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([]uint16, error) {
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 	// Open Dataset via GDAL
@@ -400,8 +400,8 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 	return b, err
 }
 
-// writeGeoTIFF_GREY creates a new TIF File with given data mapped to given bounds
-func writeGeoTIFF_GREY(
+// writeGeoTiffGrey creates a new TIF File with given data mapped to given bounds
+func writeGeoTiffGrey(
 	inputdataset, outputdataset string,
 	grey []uint16,
 	mingrey, maxgrey float64,
@@ -435,8 +435,8 @@ func writeGeoTIFF_GREY(
 	return nil
 }
 
-// writeGeoTIFF_RGB creates a new GeoTIFF File and writes provided r g b values to it
-func writeGeoTIFF_RGB(
+// writeGeoTiffRGB creates a new GeoTIFF File and writes provided r g b values to it
+func writeGeoTiffRGB(
 	inputdataset, outputdataset string,
 	red, green, blue []uint16,
 	minred, maxred, mingreen, maxgreen, minblue, maxblue float64,
