@@ -24,3 +24,6 @@ data/*
 *.tif
 data/
 dist/
+
+# Helper scripts
+deploy.sh

@@ -1,29 +1,24 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/gorilla/schema"
 	"github.com/ling-js/go-gdal"
-	"github.com/pkg/errors"
 	"github.com/segmentio/ksuid"
 	"io/ioutil"
 	"math"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
 
-// Tracks the time elapsed since start.
-func Timetrack(start time.Time, name string) {
-	elapsed := time.Since(start)
-	fmt.Printf("%s finished in %s\n", name, elapsed)
-}
-
+// HTTP-POST Body options
 type options struct {
 	Rgbbool bool    `schema:"rgbbool"`
-	S2A     bool    `schema:"s2a"`
+	S2A     bool    `schema:"l2a"`
+	TCI     bool    `schema:"tci"`
 	id      string  `schema:"-"`
 	Gscdn   string  `schema:"gscdn"`
 	Rcdn    string  `schema:"rcdn"`
@@ -33,10 +28,6 @@ type options struct {
 	Rcn     string  `schema:"rcn"`
 	Gcn     string  `schema:"gcn"`
 	Bcn     string  `schema:"bcn"`
-	Greyr   string  `schema:"greyr"`
-	Rcr     string  `schema:"rcr"`
-	Gcr     string  `schema:"gcr"`
-	Bcr     string  `schema:"bcr"`
 	Greymin float64 `schema:"greymin"`
 	Rcmin   float64 `schema:"rcmin"`
 	Gcmin   float64 `schema:"gcmin"`
@@ -47,26 +38,7 @@ type options struct {
 	Bcmax   float64 `schema:"bcmax"`
 }
 
-func parseOptions(r *http.Request) (options options, err error) {
-	err = r.ParseForm()
-
-	if err != nil {
-		return options, err
-	}
-	decoder := schema.NewDecoder()
-	err = decoder.Decode(&options, r.PostForm)
-	if err != nil {
-		return options, err
-	}
-	var ksu, err2 = ksuid.NewRandom()
-	if err2 != nil {
-		return options, err
-	}
-
-	options.id = ksu.String()
-	return options, nil
-}
-
+// GenerateHandler handles all Requests for Dataset Generation
 func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "GenerateHandler ")
 
@@ -87,8 +59,20 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Get Name of original Dataset
 	if options.S2A {
+		var resolution string
+		var datasetname string
+
+		// Get Resolution + Set base Dataset
+		if options.Rgbbool {
+			resolution = options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
+			datasetname = options.Rcdn
+		} else {
+			resolution = options.Gsc[len(options.Gsc)-7 : len(options.Gsc)-5]
+			datasetname = options.Gscdn
+		}
+
 		// Get Name of dynamically named subfolder
-		datalocation := "/opt/sentinel2/" + options.Rcdn + "/GRANULE/"
+		datalocation := "/opt/sentinel2/" + datasetname + "/GRANULE/"
 		subfolder, err := ioutil.ReadDir(datalocation)
 		if err != nil {
 			w.WriteHeader(400)
@@ -100,110 +84,34 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Get Resolution
-		resolution := options.Rcn[len(options.Rcn)-7 : len(options.Rcn)-5]
-
-		//Open Dataset via GDAL
-		originalDataset = "/opt/sentinel2/" + options.Rcdn + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + options.Rcn
+		// get name of Dataset to copy georeference
+		originalDataset = "/opt/sentinel2/" + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
+		if options.Rgbbool {
+			originalDataset += options.Rcn
+		} else {
+			originalDataset += options.Gsc
+		}
 	} else {
-		originalDataset = options.Rcdn
+		if options.Rgbbool {
+			originalDataset = options.Rcdn
+		} else {
+			originalDataset = options.Gscdn
+		}
 	}
+
+	// Read Data from source datasets
 	if options.Rgbbool {
-		var r, g, b []uint16
-
-		// Read source data
-		if options.S2A {
-			r, err = ReadDataFromDatasetL1C(options.Rcn, options.Rcdn, w)
-		} else {
-			r, err = ReadDataFromDatasetL2A(options.Rcn, options.Rcdn, w)
-		}
-		if err != nil {
-			if Verbose {
-				fmt.Println("Error reading red dataset")
-				fmt.Println(err.Error())
-			}
-			return
-		}
-		if options.S2A {
-			g, err = ReadDataFromDatasetL1C(options.Gcn, options.Gcdn, w)
-		} else {
-			g, err = ReadDataFromDatasetL2A(options.Gcn, options.Gcdn, w)
-		}
-		if err != nil {
-			if Verbose {
-				fmt.Println("Error reading green dataset")
-				fmt.Println(err.Error())
-			}
-			return
-		}
-		if options.S2A {
-			b, err = ReadDataFromDatasetL1C(options.Bcn, options.Bcdn, w)
-		} else {
-			b, err = ReadDataFromDatasetL2A(options.Bcn, options.Bcdn, w)
-		}
-		if err != nil {
-			if Verbose {
-				fmt.Println("Error reading blue dataset")
-				fmt.Println(err.Error())
-			}
-			return
-		}
-
-		err = writeGeoTIFF_RGB(
-			originalDataset, // copy georeference
-			options.id+".tif",
-			r,
-			g,
-			b,
-			options.Rcmin,
-			options.Rcmax,
-			options.Gcmin,
-			options.Gcmax,
-			options.Bcmin,
-			options.Bcmax)
-		if err != nil {
-			w.WriteHeader(500)
-			w.Write([]byte("Unable to generate RGB image: " + err.Error()))
-			if Verbose {
-				fmt.Println("Error writing data to temporary GeoTIFF File")
-				fmt.Println(err.Error())
-			}
-			return
-		}
+		err = HandleRGB(originalDataset, options, w)
+	} else if options.TCI {
+		err = HandleTCI(originalDataset, options, w)
 	} else {
-		// Read source data
-		var g []uint16
-		if options.S2A {
-			g, err = ReadDataFromDatasetL1C(options.Gsc, options.Gscdn, w)
-		} else {
-			g, err = ReadDataFromDatasetL2A(options.Gsc, options.Gscdn, w)
-		}
-		if err != nil {
-			if Verbose {
-				fmt.Println("Error reading grey dataset")
-				fmt.Println(err.Error())
-			}
-			return
-		}
-		err = writeGeoTIFF_GREY(
-			originalDataset,
-			options.id+".tif",
-			g,
-			options.Greymin,
-			options.Greymax)
-
-		if err != nil {
-			w.WriteHeader(500)
-			w.Write([]byte("Unable to generate Greyscale image: " + err.Error()))
-			if Verbose {
-				fmt.Println("Error writing data to temporary GeoTIFF File")
-				fmt.Println(err.Error())
-			}
-			return
-		}
+		err = HandleGSC(originalDataset, options, w)
+	}
+	if err != nil {
+		return
 	}
 
-	// calculate correct NODATA values
+	// choose correct NODATA values
 	var nodata string
 	if options.Rgbbool {
 		nodata = "0,0,0"
@@ -211,17 +119,158 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		nodata = "0"
 	}
 
-	// Tiling via gdal2tiles
-	cmd := exec.Command("./DEV_gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
-	fmt.Println(cmd)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	cmd.Run()
-
+	// TCI Tiling is done seperately
+	if !options.TCI {
+		// Tiling via gdal2tiles
+		cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
+		cmd.Run()
+	}
 	// 200 Response with generated ID
 	w.Write([]byte(options.id))
 }
 
+// HandleRGB handles creation of RGB Images from user-supplied Input Datasets
+func HandleRGB(originalDataset string, options options, w http.ResponseWriter) error {
+	var r, g, b []uint16
+	var err error
+
+	// Read red dataset
+	if !options.S2A {
+		r, err = ReadDataFromDatasetL1C(options.Rcn, options.Rcdn, w)
+	} else {
+		r, err = ReadDataFromDatasetL2A(options.Rcn, options.Rcdn, w)
+	}
+	if err != nil {
+		if Verbose {
+			fmt.Println("Error reading red dataset")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+
+	// Read green dataset
+	if !options.S2A {
+		g, err = ReadDataFromDatasetL1C(options.Gcn, options.Gcdn, w)
+	} else {
+		g, err = ReadDataFromDatasetL2A(options.Gcn, options.Gcdn, w)
+	}
+	if err != nil {
+		if Verbose {
+			fmt.Println("Error reading green dataset")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+
+	// Read blue dataset
+	if !options.S2A {
+		b, err = ReadDataFromDatasetL1C(options.Bcn, options.Bcdn, w)
+	} else {
+		b, err = ReadDataFromDatasetL2A(options.Bcn, options.Bcdn, w)
+	}
+	if err != nil {
+		if Verbose {
+			fmt.Println("Error reading blue dataset")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+
+	// Write all data to temporary tif file
+	err = writeGeoTiffRGB(
+		originalDataset, // copy georeference
+		options.id+".tif",
+		r,
+		g,
+		b,
+		options.Rcmin,
+		options.Rcmax,
+		options.Gcmin,
+		options.Gcmax,
+		options.Bcmin,
+		options.Bcmax)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Unable to generate RGB image: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error writing data to temporary GeoTIFF File")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
+// HandleGSC handles creation of Greyscale Images from user-supplied Input Dataset
+func HandleGSC(originalDataset string, options options, w http.ResponseWriter) error {
+	// Read source data
+	var g []uint16
+	var err error
+
+	if !options.S2A {
+		g, err = ReadDataFromDatasetL1C(options.Gsc, options.Gscdn, w)
+	} else {
+		g, err = ReadDataFromDatasetL2A(options.Gsc, options.Gscdn, w)
+	}
+	if err != nil {
+		if Verbose {
+			fmt.Println("Error reading grey dataset")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+
+	// Write Data to .tif
+	err = writeGeoTiffGrey(
+		originalDataset,
+		options.id+".tif",
+		g,
+		options.Greymin,
+		options.Greymax)
+	if err != nil {
+		w.WriteHeader(500)
+		w.Write([]byte("Unable to generate Greyscale image: " + err.Error()))
+		if Verbose {
+			fmt.Println("Error writing data to temporary GeoTIFF File")
+			fmt.Println(err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
+// HandleTCI handles Request for True Color Images
+func HandleTCI(originalDataset string, options options, w http.ResponseWriter) error {
+
+	// Get jp2 location from L1C Dataset
+	if !options.S2A {
+		dataset, err := gdal.Open(originalDataset, gdal.ReadOnly)
+		if err != nil {
+			w.WriteHeader(500)
+			w.Write([]byte("Error opening Dataset: " + err.Error()))
+			if Verbose {
+				fmt.Println("Error opening Dataset by GDAL")
+				fmt.Println(err.Error())
+			}
+			return err
+		}
+		// Get jp2 Location
+		originalDataset = dataset.FileList()[2]
+	}
+
+	if Verbose {
+		fmt.Println("Running Tiling Script...")
+	}
+	// Tiling via gdal2tiles
+	cmd := exec.Command("./gdal2tiles.py", "--resume","-v", "-z", "9-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
+	cmd.Run()
+	if Verbose {
+		fmt.Println("... Tiling Script finished.")
+	}
+	return nil
+}
+
+// ReadDataFromDatasetL2A reads a Sentinel Level 2A Dataset into uint16 slice
 func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter) ([]uint16, error) {
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 
@@ -252,6 +301,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 	// create Data buffer
 	b := make([]uint16, rasterSize*rasterSize)
 
+	// Read data from dataset
 	err = dataset.IO(
 		gdal.Read,
 		0,
@@ -275,11 +325,11 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 		}
 		return nil, err
 	}
-	fmt.Println(b)
-	// return filled buffer
+	// return filled data slice
 	return b, nil
 }
 
+// ReadDataFromDatasetL1C reads a Sentinel Level 1C Dataset into uint16 slice
 func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([]uint16, error) {
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 	// Open Dataset via GDAL
@@ -294,7 +344,7 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 		return nil, err
 	}
 
-	// map bandname to appropiate bandnumber
+	// map bandname to appropriate bandnumber
 	rasterbands := dataset.RasterCount()
 	var bandnumber int
 	for i := 1; i <= rasterbands; i++ {
@@ -322,9 +372,8 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 		}
 		return nil, errors.New("dummy")
 	}
-
-	// defer closing until function exit
 	defer dataset.Close()
+
 	// get dimensions
 	rasterSize := dataset.RasterXSize()
 	// create Data buffer
@@ -358,7 +407,8 @@ func ReadDataFromDatasetL1C(bandname, filename string, w http.ResponseWriter) ([
 	return b, err
 }
 
-func writeGeoTIFF_GREY(
+// writeGeoTiffGrey creates a new TIF File with given data mapped to given bounds
+func writeGeoTiffGrey(
 	inputdataset, outputdataset string,
 	grey []uint16,
 	mingrey, maxgrey float64,
@@ -367,11 +417,13 @@ func writeGeoTIFF_GREY(
 	if err != nil {
 		return err
 	}
+	defer newdataset.Close()
 
 	// Map original Values to 0-255 space
 	var data8bit = make([]byte, len(grey))
 	transformColorValues(data8bit, grey, maxgrey, mingrey, len(grey))
 
+	// Write to File
 	newdataset.IO(
 		gdal.Write,
 		0,
@@ -383,6 +435,61 @@ func writeGeoTIFF_GREY(
 		rastersize,
 		1,
 		[]int{1},
+		0,
+		0,
+		0,
+	)
+	return nil
+}
+
+// writeGeoTiffRGB creates a new GeoTIFF File and writes provided r g b values to it
+func writeGeoTiffRGB(
+	inputdataset, outputdataset string,
+	red, green, blue []uint16,
+	minred, maxred, mingreen, maxgreen, minblue, maxblue float64,
+) error {
+	defer Timetrack(time.Now(), "WriteGeoTIFF: ")
+
+	// Create base File
+	newdataset, rastersize, err := createGeoTIFF(inputdataset, outputdataset, 3)
+	if err != nil {
+		return err
+	}
+
+	// get size of dataset with highest resolution
+	maxresolution := 0
+	lenblue := len(blue)
+	lenred := len(red)
+	lengreen := len(green)
+
+	if lenred > lengreen && lenred > lenblue {
+		maxresolution = lenred
+	} else if lengreen > lenred && lengreen > lenblue {
+		maxresolution = lengreen
+	} else {
+		maxresolution = lenblue
+	}
+
+	// temporary container for output data
+	var data8bit = make([]byte, maxresolution*3)
+
+	// Transform all Color values to 0-255 space
+	transformColorValues(data8bit[:maxresolution], red, maxred, minred, maxresolution)
+	transformColorValues(data8bit[maxresolution:2*maxresolution], green, maxgreen, mingreen, maxresolution)
+	transformColorValues(data8bit[2*maxresolution:], blue, maxblue, minblue, maxresolution)
+
+	// Write Data to file
+	newdataset.IO(
+		gdal.Write,
+		0,
+		0,
+		rastersize,
+		rastersize,
+		data8bit,
+		rastersize,
+		rastersize,
+		3,
+		[]int{1, 2, 3},
 		0,
 		0,
 		0,
@@ -401,6 +508,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 	}
 	defer original.Close()
 
+	// Copy original size to new Dataset
 	rastersize := original.RasterXSize()
 
 	driver, err := gdal.GetDriverByName("GTiff")
@@ -408,6 +516,7 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 		return nil, 0, err
 	}
 
+	// Create new file and write Dataset
 	newdataset := driver.Create(
 		outputdataset,
 		rastersize,
@@ -424,16 +533,18 @@ func createGeoTIFF(inputdataset, outputdataset string, bandcount int) (*gdal.Dat
 }
 
 // transformColorValues transforms given 16-bit values into 8-bit values.
+// If input size is smaller than the desired output size the input is scaled to output by value duplication
 // Linear transform unless original values are outside given bounds, then 0
-//
 func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue float64, newsize int) {
 	delta := sliceDelta(data)
 	originalrowsize := int(math.Sqrt(float64(len(data))))
 	newrowsize := int(math.Sqrt(float64(newsize)))
 
+	// Get scaling Factor
 	var runnerdelta int
 	switch factor := (newrowsize - originalrowsize) / 1830; factor {
 	case 0:
+		// Shortcut to skip scaling
 		runnerdelta = -999
 	case 2:
 		runnerdelta = 3
@@ -443,7 +554,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 		runnerdelta = 6
 	}
 
-	// Optimize if newscale is same as oldscale
+	// Skip scaling if newscale is same as oldscale
 	if runnerdelta != -999 {
 		runner := 0
 		runnerY := runnerdelta
@@ -451,7 +562,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 
 		for i := 0; i < newsize; i++ {
 			// Check if we are at end of line in matrix
-			if i%(newrowsize-1) == 0 && i != 0 {
+			if i%(newrowsize) == 0 && i != 0 {
 				runnerY--
 				// If runnerY is zero reset runner to start of line
 				if runnerY != 0 {
@@ -480,6 +591,7 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 			output[i] = (byte)((c / delta) * 255)
 		}
 	} else {
+		// Fast transform
 		for i := 0; i < newsize; i++ {
 			c := float64(data[i])
 			// check if value is within bounds
@@ -492,62 +604,34 @@ func transformColorValues(output []uint8, data []uint16, maxvalue, minvalue floa
 	}
 }
 
-func writeGeoTIFF_RGB(
-	inputdataset, outputdataset string,
-	red, green, blue []uint16,
-	minred, maxred, mingreen, maxgreen, minblue, maxblue float64,
-) error {
-	defer Timetrack(time.Now(), "WriteGeoTIFF: ")
-
-	newdataset, rastersize, err := createGeoTIFF(inputdataset, outputdataset, 3)
+// parseOptions parses HTTP-Post Body to options struct
+func parseOptions(r *http.Request) (options options, err error) {
+	// Parse POST-Body
+	err = r.ParseForm()
 	if err != nil {
-		return err
+		return options, err
 	}
 
-	// 8bit data
-	var data8bit = make([]byte, 361681200)
-
-	// get size of dataset with highest resolution
-	maxresolution := 0
-	lenblue := len(blue)
-	lenred := len(red)
-	lengreen := len(green)
-
-	if lenred > lengreen && lenred > lenblue {
-		maxresolution = lenred
-	} else if lengreen > lenred && lengreen > lenblue {
-		maxresolution = lengreen
-	} else {
-		maxresolution = lenblue
+	// Parse POST-Body to options struct
+	decoder := schema.NewDecoder()
+	err = decoder.Decode(&options, r.PostForm)
+	if err != nil {
+		return options, err
 	}
 
-	// for red channel
-	transformColorValues(data8bit[:120560400], red, maxred, minred, maxresolution)
-	transformColorValues(data8bit[120560400:241120800], green, maxgreen, mingreen, maxresolution)
-	transformColorValues(data8bit[241120800:], blue, maxblue, minblue, maxresolution)
+	// Create unique random id for temporary TMS
+	var ksu, err2 = ksuid.NewRandom()
+	if err2 != nil {
+		return options, err
+	}
+	options.id = ksu.String()
 
-	newdataset.IO(
-		gdal.Write,
-		0,
-		0,
-		rastersize,
-		rastersize,
-		data8bit,
-		rastersize,
-		rastersize,
-		3,
-		[]int{1, 2, 3},
-		0,
-		0,
-		0,
-	)
-	newdataset.Close()
-	return nil
+	return options, nil
 }
 
 // sliceDelta return the difference between largest and smallest number in slice
-//TODO(specki): Maybe refactor to use ComputeMinMax() of GDAL Rasterband
 func sliceDelta(slice []uint16) (delta float64) {
+	defer Timetrack(time.Now(), "MinMaxComputation")
 	var min, max uint16
 	for _, element := range slice {
 		if element < min {
