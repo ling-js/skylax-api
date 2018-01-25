@@ -280,8 +280,17 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 					//
 					location := datalocation + datasetname[0].Name()
 					datasetsR10M, err := ioutil.ReadDir(location + "/IMG_DATA/R10m/")
+					if err != nil {
+						return nil, nil, 0, err
+					}
 					datasetsR20M, err := ioutil.ReadDir(location + "/IMG_DATA/R20m/")
+					if err != nil {
+						return nil, nil, 0, err
+					}
 					datasetsR60M, err := ioutil.ReadDir(location + "/IMG_DATA/R60m/")
+					if err != nil {
+						return nil, nil, 0, err
+					}
 
 					var datasetsR10Mstring string
 					for i := range datasetsR10M {
