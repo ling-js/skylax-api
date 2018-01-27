@@ -122,7 +122,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 	// TCI Tiling is done separately
 	if !options.TCI {
 		// Tiling via gdal2tiles
-		cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "9-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
+		cmd := exec.Command("./gdal2tiles.py", "--resume", "-z", "4-12", "-w", "none", "-a", nodata, options.id+".tif", "data/"+options.id+"/")
 		cmd.Run()
 	}
 	// 200 Response with generated ID
@@ -262,7 +262,7 @@ func HandleTCI(originalDataset string, options options, w http.ResponseWriter) e
 		fmt.Println("Running Tiling Script...")
 	}
 	// Tiling via gdal2tiles
-	cmd := exec.Command("./gdal2tiles.py", "--resume", "-v", "-z", "9-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
+	cmd := exec.Command("./gdal2tiles.py", "--resume", "-v", "-z", "4-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
 	cmd.Run()
 	if Verbose {
 		fmt.Println("... Tiling Script finished.")

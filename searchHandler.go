@@ -30,6 +30,10 @@ func (nf Sentinel2Dataset) Less(i, j int) bool {
 func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()
+
+	if Verbose {
+		fmt.Println(q)
+	}
 	// Get all Datasets from Directory
 	datasets, err := ioutil.ReadDir("/opt/sentinel2")
 	if err != nil {
