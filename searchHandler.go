@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/ling-js/go-gdal"
 	"github.com/paulsmith/gogeos/geos"
@@ -66,6 +67,9 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Write([]byte(err.Error()))
 			return
+		}
+		if Verbose {
+			fmt.Println("Parsed bbox from request as: " + bbox.String())
 		}
 	}
 
@@ -175,16 +179,18 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		// Try to get L1C Metadata
 		dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
 		if err == nil {
-			// Get Metadata via hardcoded position
-			generationTimeRAW = dataset.Metadata("")[12][16:]
-			footprintRAW = dataset.Metadata("")[9][10:]
+			generationTimeRAW, footprintRAW, err = getMetadataItems(dataset.Metadata(""))
+			if err != nil {
+				return err
+			}
 		} else {
 			// Else Try to get S2A Metadata
 			dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml", gdal.ReadOnly)
 			if err == nil {
-				// Get Metadata via hardcoded position
-				generationTimeRAW = dataset.Metadata("")[17][16:]
-				footprintRAW = dataset.Metadata("")[14][10:]
+				generationTimeRAW, footprintRAW, err = getMetadataItems(dataset.Metadata(""))
+				if err != nil {
+					return err
+				}
 			} else {
 				return err
 			}
@@ -316,7 +322,35 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 	return metadataL1C, metadataL2A, totalcounter, nil
 }
 
-// Creates a JSON Object as byte slice from gdalinfo output
+// getMetadataItems gets the Metadataitems 'GENERATION_TIME' and 'FOOTPRINT' from Dataset Metadata
+func getMetadataItems(metadata []string) (generationTimeRAW, footprintRAW string, err error){
+
+	// Get Metadata
+	generationTimeRAW = extractMetadata(metadata, "GENERATION_TIME=")
+	footprintRAW = extractMetadata(metadata, "FOOTPRINT=")
+
+	// Key not found in Metadata
+	if generationTimeRAW == "" {
+		return "", "", errors.New("No Metadataitem for key 'GENERATION_TIME=' found")
+	}
+	// Key not found in Metadata
+	if footprintRAW == "" {
+		return "", "", errors.New("No Metadataitem for key 'FOOTPRINT=' found")
+	}
+	return generationTimeRAW[16:], footprintRAW[10:], nil
+}
+
+// extractMetadata gets the string containing keyword from the slice
+func extractMetadata(metadata []string, keyword string) string {
+	for index := range metadata {
+		if metadata[index][:len(keyword)] == keyword {
+			return metadata[index]
+		}
+	}
+	return ""
+}
+
+// createJson creates a JSON Object as byte slice from gdalinfo output
 func createJSON(input []string, output *[]byte) error {
 	// Convert into JSON
 	fields := make(map[string]string)
