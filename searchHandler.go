@@ -175,7 +175,7 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 	for index := range datasets {
 		// Only deal with existent datasets
 		if datasets[index] == nil {
-			return nil
+			continue
 		}
 
 		var generationTimeRAW, footprintRAW string
