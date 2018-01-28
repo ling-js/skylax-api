@@ -29,13 +29,27 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	datasetname := q.Get("d")
 	bandname := q.Get("b")
 
+	// If Verbose is toggle print parsed output
+	if Verbose {
+		fmt.Print("Request to /value with parameters: ")
+		fmt.Println(q)
+	}
+
+	// local variables
 	var output []byte
 	var err error
+	tci := false
 
 	// Check if S2A Dataset
 	if datasetname[:8] != "SENTINEL" {
+
+		// check if TCI Dataset
+		if bandname[len(bandname)-11:len(bandname)-8] == "TCI" {
+			tci = true
+		}
+
 		// Get Name of dynamically named subfolder
-		datalocation := "/opt/sentinel2/" + datasetname + "/GRANULE/"
+		datalocation := DataSource + datasetname + "/GRANULE/"
 		subfolder, err := ioutil.ReadDir(datalocation)
 		if err != nil {
 			w.WriteHeader(404)
@@ -47,13 +61,17 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 		resolution := bandname[len(bandname)-7 : len(bandname)-5]
 
 		// Get Pixel Data
-		datasetlocation := "/opt/sentinel2/" + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + bandname
-
+		datasetlocation := DataSource + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/" + bandname
 		output, err = exec.Command("gdallocationinfo", "-xml", "-wgs84", datasetlocation, xcoord, ycoord).Output()
 		if err != nil {
 			fmt.Println(err.Error())
 		}
 	} else {
+		// check if TCI Dataset
+		if bandname == "TCI" {
+			tci = true
+		}
+		// Get Pixel Data
 		output, err = exec.Command("gdallocationinfo", "-xml", "-wgs84", datasetname, xcoord, ycoord).Output()
 	}
 	// Check for error while executing gdallocationinfo
@@ -68,6 +86,12 @@ func LookupHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Error parsing xml. Error was: " + err.Error()))
+	}
+
+	// Compute TCI Values into json array
+	if tci {
+		w.Write([]byte("[" + v.Bands[0].Value + "," + v.Bands[1].Value + "," + v.Bands[2].Value + "]"))
+		return
 	}
 
 	// Check if S2A Dataset
