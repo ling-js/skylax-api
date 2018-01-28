@@ -44,6 +44,12 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 
 	options, err := parseOptions(r)
 
+	// Log request if verbose is set
+	if Verbose {
+		fmt.Print("Request to /generate with following parameters: ")
+		fmt.Println(options)
+	}
+
 	if err != nil {
 		w.WriteHeader(400)
 		w.Write([]byte("Unable to parse parameters: " + err.Error()))
@@ -72,7 +78,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Get Name of dynamically named subfolder
-		datalocation := "/opt/sentinel2/" + datasetname + "/GRANULE/"
+		datalocation := DataSource + datasetname + "/GRANULE/"
 		subfolder, err := ioutil.ReadDir(datalocation)
 		if err != nil {
 			w.WriteHeader(400)
@@ -85,7 +91,7 @@ func GenerateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// get name of Dataset to copy georeference
-		originalDataset = "/opt/sentinel2/" + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
+		originalDataset = DataSource + datasetname + "/GRANULE/" + subfolder[0].Name() + "/IMG_DATA/R" + resolution + "m/"
 		if options.Rgbbool {
 			originalDataset += options.Rcn
 		} else {
@@ -259,7 +265,7 @@ func HandleTCI(originalDataset string, options options, w http.ResponseWriter) e
 	}
 
 	if Verbose {
-		fmt.Println("Running Tiling Script...")
+		fmt.Println("Running Tiling Script for Dataset " + originalDataset + "...")
 	}
 	// Tiling via gdal2tiles
 	cmd := exec.Command("./gdal2tiles.py", "--resume", "-v", "-z", "4-12", "-w", "none", "-a", "0,0,0", originalDataset, "data/"+options.id+"/")
@@ -275,7 +281,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 	defer Timetrack(time.Now(), "Reading Data from Dataset "+filename)
 
 	// Get Name of dynamically named subfolder
-	datalocation := "/opt/sentinel2/" + filename + "/GRANULE/"
+	datalocation := DataSource + filename + "/GRANULE/"
 	subfolder, err := ioutil.ReadDir(datalocation)
 	if err != nil {
 		return nil, err
@@ -285,7 +291,7 @@ func ReadDataFromDatasetL2A(datasetname, filename string, w http.ResponseWriter)
 	resolution := datasetname[len(datasetname)-7 : len(datasetname)-5]
 
 	//Open Dataset via GDAL
-	dataset, err := gdal.Open("/opt/sentinel2/"+filename+"/GRANULE/"+subfolder[0].Name()+"/IMG_DATA/R"+resolution+"m/"+datasetname, gdal.ReadOnly)
+	dataset, err := gdal.Open(DataSource+filename+"/GRANULE/"+subfolder[0].Name()+"/IMG_DATA/R"+resolution+"m/"+datasetname, gdal.ReadOnly)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Error opening Dataset: " + err.Error()))

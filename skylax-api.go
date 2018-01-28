@@ -13,13 +13,20 @@ import (
 // Verbose command line Parameter
 var Verbose = false
 
+// Source directory command line Parameter
+var DataSource = ""
+
 func main() {
 
 	// Get command-line flags
+	filelocation := flag.String("src", "/opt/sentinel2/", "set source directory for datasets")
 	verbose := flag.Bool("v", false, "toggle verbose output")
 	flag.Parse()
 	if *verbose {
 		Verbose = true
+	}
+	if *filelocation != "" {
+		DataSource = *filelocation
 	}
 
 	// Create Routes

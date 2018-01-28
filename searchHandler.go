@@ -23,7 +23,7 @@ func (nf Sentinel2Dataset) Len() int      { return len(nf) }
 func (nf Sentinel2Dataset) Swap(i, j int) { nf[i], nf[j] = nf[j], nf[i] }
 func (nf Sentinel2Dataset) Less(i, j int) bool {
 	// Compare names from 12th letter onwards lexicographically
-	return nf[i].Name()[11:] < nf[j].Name()[11:]
+	return nf[i].Name()[11:] > nf[j].Name()[11:]
 }
 
 // SearchHandler returns all Datasets not matching one of the filter criteria.
@@ -31,11 +31,13 @@ func SearchHandler(w http.ResponseWriter, r *http.Request) {
 	defer Timetrack(time.Now(), "Search ")
 	q := r.URL.Query()
 
+	// Log request if verbose is set
 	if Verbose {
+		fmt.Print("Request to /search with parameters: ")
 		fmt.Println(q)
 	}
 	// Get all Datasets from Directory
-	datasets, err := ioutil.ReadDir("/opt/sentinel2")
+	datasets, err := ioutil.ReadDir(DataSource)
 	if err != nil {
 		w.WriteHeader(500)
 		w.Write([]byte("Unable to open Data Repository: " + err.Error()))
@@ -181,7 +183,7 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 		var err error
 
 		// Try to get L1C Metadata
-		dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
+		dataset, err = gdal.Open(DataSource+datasets[index].Name()+"/MTD_MSIL1C.xml", gdal.ReadOnly)
 		if err == nil {
 			generationTimeRAW, footprintRAW, err = getMetadataItems(dataset.Metadata(""))
 			if err != nil {
@@ -189,7 +191,7 @@ func metaDataFilter(datasets []os.FileInfo, startDateRAW, endDateRAW string, bbo
 			}
 		} else {
 			// Else Try to get S2A Metadata
-			dataset, err = gdal.Open("/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml", gdal.ReadOnly)
+			dataset, err = gdal.Open(DataSource+datasets[index].Name()+"/MTD_MSIL2A.xml", gdal.ReadOnly)
 			if err == nil {
 				generationTimeRAW, footprintRAW, err = getMetadataItems(dataset.Metadata(""))
 				if err != nil {
@@ -261,7 +263,7 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 
 				// Try to open and read Metadata of L1C Dataset
 				dataset, err := gdal.Open(
-					"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL1C.xml",
+					DataSource+datasets[index].Name()+"/MTD_MSIL1C.xml",
 					gdal.ReadOnly)
 				if err == nil {
 					L2A = false
@@ -270,7 +272,7 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 				} else {
 					// Try to open and read Metadata of L2A Dataset
 					dataset, err := gdal.Open(
-						"/opt/sentinel2/"+datasets[index].Name()+"/MTD_MSIL2A.xml",
+						DataSource+datasets[index].Name()+"/MTD_MSIL2A.xml",
 						gdal.ReadOnly)
 					if err == nil {
 						L2A = true
@@ -282,7 +284,7 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 				}
 				if L2A {
 					// Get datast location (with dynamic folder name)
-					datalocation := "/opt/sentinel2/" + datasets[index].Name() + "/GRANULE/"
+					datalocation := DataSource + datasets[index].Name() + "/GRANULE/"
 					datasetname, err := ioutil.ReadDir(datalocation)
 					if err != nil {
 						return nil, nil, 0, err
@@ -327,7 +329,7 @@ func getMetaData(datasets []os.FileInfo, page int) (metadataL1C, metadataL2A []b
 }
 
 // getMetadataItems gets the Metadataitems 'GENERATION_TIME' and 'FOOTPRINT' from Dataset Metadata
-func getMetadataItems(metadata []string) (generationTimeRAW, footprintRAW string, err error){
+func getMetadataItems(metadata []string) (generationTimeRAW, footprintRAW string, err error) {
 
 	// Get Metadata
 	generationTimeRAW = extractMetadata(metadata, "GENERATION_TIME=")
