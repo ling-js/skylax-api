@@ -13,7 +13,7 @@ import (
 // Verbose command line Parameter
 var Verbose = false
 
-// Source directory command line Parameter
+// DataSource command line Parameter
 var DataSource = ""
 
 func main() {
